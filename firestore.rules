@@ -1,0 +1,92 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Fields:
+//   - email: string (required)
+//   - role: string ('admin', 'client') (required)
+//   - displayName: string
+//
+// Collection: business_listings
+// Fields:
+//   - uid: string (required) - Creator's UID
+//   - name: string (required)
+//   - address: string
+//   - website: string
+//   - phone: string
+//   - email: string
+//   - socialLinks: array
+//   - category: string
+//   - hasWebsite: bool
+//   - isWebsiteGood: bool
+//   - auditComment: string
+//   - leadScore: number
+//   - outreachStrategy: string
+//   - status: string (required, 'new', 'contacted', 'qualified', 'rejected')
+//   - createdAt: timestamp
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "akash@prospect.com" && request.auth.token.email_verified == true) ||
+         (request.auth.token.email == "akash.s@cisinlabs.com") ||
+         (request.auth.token.email == "codingdestini435@gmail.com"));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role']) &&
+             data.role in ['admin', 'client'];
+    }
+
+    function isValidListing(data) {
+      return data.keys().hasAll(['name', 'status', 'uid']) &&
+             data.status in ['new', 'contacted', 'qualified', 'rejected'];
+    }
+
+    function isValidScan(data) {
+      return data.keys().hasAll(['location', 'keyword', 'timestamp', 'uid']);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'client' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /business_listings/{listingId} {
+      allow read: if isAuthenticated();
+      // Admins can manage all, clients can add their own
+      allow create: if isAuthenticated() && isValidListing(request.resource.data) && (request.resource.data.uid == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (isAdmin() || (resource.data.uid == request.auth.uid && isValidListing(request.resource.data)));
+      allow delete: if isAdmin();
+    }
+
+    match /scans/{scanId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
+      allow create: if isAuthenticated() && isValidScan(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "BusinessListing": {
+      "title": "Business Listing",
+      "description": "Store information about a researched business lead.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The UID of the user who added/researched this business." },
+        "name": { "type": "string", "description": "Business name." },
+        "address": { "type": "string", "description": "Physical address." },
+        "website": { "type": "string", "description": "Website URL (if any)." },
+        "phone": { "type": "string", "description": "Phone number." },
+        "email": { "type": "string", "description": "Email address (if found)." },
+        "socialLinks": { "type": "array", "description": "Social media profile URLs." },
+        "category": { "type": "string", "description": "Business category (e.g., HVAC, Dentist)." },
+        "rating": { "type": "number", "description": "Google Rating 0-5." },
+        "reviewsCount": { "type": "number", "description": "Total Google Reviews." },
+        "hasWebsite": { "type": "boolean", "description": "Whether the business has a website." },
+        "isWebsiteGood": { "type": "boolean", "description": "AI assessment of whether the website is 'good'." },
+        "auditComment": { "type": "string", "description": "AI comment on the website audit." },
+        "technicalAudit": {
+          "type": "object",
+          "properties": {
+            "seoScore": { "type": "number" },
+            "mobileFriendly": { "type": "boolean" },
+            "loadSpeed": { "type": "string" }
+          }
+        },
+        "leadScore": { "type": "number", "description": "AI generated lead priority score 1-100." },
+        "outreachStrategy": { "type": "string", "description": "AI generated strategy for contacting this lead." },
+        "status": { "type": "string", "enum": ["new", "contacted", "qualified", "rejected"], "description": "Lead status." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the lead was added." }
+      },
+      "required": ["name", "status"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Metadata for the user.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "client"], "description": "User permission level." },
+        "displayName": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "Scan": {
+      "title": "Scan History",
+      "description": "Store results of a business discovery scan.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "location": { "type": "string" },
+        "keyword": { "type": "string" },
+        "results": { "type": "array", "description": "Serialized results or count." },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["location", "keyword", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/business_listings/{listingId}": {
+      "schema": "BusinessListing",
+      "description": "Publicly searchable/viewable business leads (based on permissions)."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile data."
+    },
+    "/scans/{scanId}": {
+      "schema": "Scan",
+      "description": "History of business discovery scans."
+    }
+  }
+}
