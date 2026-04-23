@@ -1,8 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-inter: "Inter", sans-serif;
 
@@ -38,48 +39,48 @@
 
 @layer base {
   :root {
-    --background: #f8fafc;
-    --foreground: #0f172a;
+    --background: #fbfbfb;
+    --foreground: #1a1a1b;
     --card: #ffffff;
-    --card-foreground: #0f172a;
+    --card-foreground: #1a1a1b;
     --popover: #ffffff;
-    --popover-foreground: #0f172a;
-    --primary: #2563eb;
+    --popover-foreground: #1a1a1b;
+    --primary: #1a1a1b;
     --primary-foreground: #ffffff;
-    --secondary: #f1f5f9;
-    --secondary-foreground: #475569;
-    --muted: #f1f5f9;
-    --muted-foreground: #64748b;
-    --accent: #f1f5f9;
-    --accent-foreground: #0f172a;
+    --secondary: #f4f4f2;
+    --secondary-foreground: #4e4e4e;
+    --muted: #f4f4f2;
+    --muted-foreground: #808080;
+    --accent: #f4f4f2;
+    --accent-foreground: #1a1a1b;
     --destructive: #ef4444;
     --destructive-foreground: #ffffff;
-    --border: #e2e8f0;
-    --input: #e2e8f0;
-    --ring: #3b82f6;
-    --radius: 0.5rem;
+    --border: #e6e6e3;
+    --input: #e6e6e3;
+    --ring: #1a1a1b;
+    --radius: 0.25rem;
   }
 
   .dark {
-    --background: #020617;
-    --foreground: #f8fafc;
-    --card: #0f172a;
-    --card-foreground: #f8fafc;
-    --popover: #0f172a;
-    --popover-foreground: #f8fafc;
-    --primary: #3b82f6;
-    --primary-foreground: #ffffff;
-    --secondary: #1e293b;
-    --secondary-foreground: #f8fafc;
-    --muted: #1e293b;
-    --muted-foreground: #94a3b8;
-    --accent: #1e293b;
-    --accent-foreground: #f8fafc;
-    --destructive: #7f1d1d;
-    --destructive-foreground: #f8fafc;
-    --border: #1e293b;
-    --input: #1e293b;
-    --ring: #3b82f6;
+    --background: #101010;
+    --foreground: #f4f4f2;
+    --card: #181818;
+    --card-foreground: #f4f4f2;
+    --popover: #181818;
+    --popover-foreground: #f4f4f2;
+    --primary: #f4f4f2;
+    --primary-foreground: #101010;
+    --secondary: #1d1d1b;
+    --secondary-foreground: #d1d1cf;
+    --muted: #1d1d1b;
+    --muted-foreground: #909090;
+    --accent: #1d1d1b;
+    --accent-foreground: #f4f4f2;
+    --destructive: #991b1b;
+    --destructive-foreground: #f4f4f2;
+    --border: #262624;
+    --input: #262624;
+    --ring: #f4f4f2;
   }
 }
 
@@ -88,7 +89,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground antialiased font-sans transition-colors duration-300;
+    @apply bg-background text-foreground antialiased font-serif leading-relaxed transition-colors duration-300;
   }
 
   /* Custom Scrollbar */

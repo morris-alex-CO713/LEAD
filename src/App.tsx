@@ -61,7 +61,11 @@ import {
   Sun,
   Moon,
   Columns as ColumnsIcon,
-  TableProperties
+  TableProperties,
+  Briefcase,
+  Clock,
+  Wrench,
+  AlertTriangle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -135,6 +139,20 @@ interface ScanHistory {
   radius?: number;
 }
 
+interface PortfolioClient {
+  id: string;
+  uid: string;
+  businessId: string;
+  name: string;
+  websiteUrl: string;
+  workDone: string;
+  detailedDescription: string;
+  expiryDate: any;
+  nextServiceDate: any;
+  status: 'active' | 'maintenance' | 'expired';
+  createdAt: any;
+}
+
 // --- App Component ---
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -150,6 +168,7 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [listings, setListings] = useState<BusinessListing[]>([]);
   const [scans, setScans] = useState<ScanHistory[]>([]);
+  const [portfolio, setPortfolio] = useState<PortfolioClient[]>([]);
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchLocation, setSearchLocation] = useState('');
@@ -270,8 +289,9 @@ export default function App() {
     
     const { draggableId, destination } = result;
     const newStatus = destination.droppableId as BusinessListing['status'];
+    const lead = listings.find(l => l.id === draggableId);
     
-    if (newStatus === listings.find(l => l.id === draggableId)?.status) return;
+    if (newStatus === lead?.status) return;
 
     setListings(prev => prev.map(l => l.id === draggableId ? { ...l, status: newStatus } : l));
     
@@ -279,6 +299,13 @@ export default function App() {
       await updateDoc(doc(db, 'business_listings', draggableId), {
         status: newStatus
       });
+
+      // Automatically trigger promotion flow if moved to closed
+      if (newStatus === 'closed' && lead) {
+         setSelectedLeadForOutreach(lead);
+         setIsPromotionDialogOpen(true);
+         toast.info(`Acquisition protocol initiated for ${lead.name}`);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Failed to update status.");
@@ -290,6 +317,13 @@ export default function App() {
 
   // Manual Add Dialog
   const [isManualAddOpen, setIsManualAddOpen] = useState(false);
+  const [isPromotionDialogOpen, setIsPromotionDialogOpen] = useState(false);
+  const [promotionDetails, setPromotionDetails] = useState({
+    workDone: '',
+    detailedDescription: '',
+    expiryMonths: 12,
+    nextServiceMonths: 6,
+  });
   const [extractionStep, setExtractionStep] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -336,6 +370,13 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    // Scroll to top on tab change
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTo(0, 0);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     testFirestoreConnection();
 
     // Check local storage for persistent session
@@ -352,9 +393,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !auth.currentUser) {
       setListings([]);
       setScans([]);
+      setPortfolio([]);
       return;
     }
 
@@ -376,11 +418,58 @@ export default function App() {
       setScans(data);
     });
 
+    // Portfolio Subscription
+    const portfolioPath = 'portfolio_vault';
+    const qPortfolio = query(collection(db, portfolioPath), orderBy('createdAt', 'desc'));
+    const unsubscribePortfolio = onSnapshot(qPortfolio, (snap) => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PortfolioClient));
+      setPortfolio(data);
+    });
+
     return () => {
       unsubscribeListings();
       unsubscribeScans();
+      unsubscribePortfolio();
     };
   }, [user]);
+
+  const promoteLeadToClient = async () => {
+    if (!selectedLeadForOutreach || !user) return;
+    
+    try {
+      const now = new Date();
+      
+      const expiryDate = new Date(now);
+      expiryDate.setMonth(expiryDate.getMonth() + promotionDetails.expiryMonths);
+      
+      const nextServiceDate = new Date(now);
+      nextServiceDate.setMonth(nextServiceDate.getMonth() + promotionDetails.nextServiceMonths);
+
+      const clientData = {
+        uid: auth.currentUser?.uid || 'akash-prospect-admin',
+        businessId: selectedLeadForOutreach.id,
+        name: selectedLeadForOutreach.name,
+        websiteUrl: selectedLeadForOutreach.website || '',
+        workDone: promotionDetails.workDone,
+        detailedDescription: promotionDetails.detailedDescription,
+        expiryDate: expiryDate.toISOString(),
+        nextServiceDate: nextServiceDate.toISOString(),
+        status: 'active',
+        createdAt: serverTimestamp()
+      };
+
+      await addDoc(collection(db, 'portfolio_vault'), clientData);
+      await updateDoc(doc(db, 'business_listings', selectedLeadForOutreach.id), { status: 'closed' });
+      
+      setIsPromotionDialogOpen(false);
+      setPromotionDetails({ workDone: '', detailedDescription: '', expiryMonths: 12, nextServiceMonths: 6 });
+      toast.success(`${selectedLeadForOutreach.name} promoted to Portfolio Vault!`);
+      closeLeadDetail();
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to promote lead.");
+    }
+  };
 
   const handleLogin = () => {
     if (loginEmail === 'akash@prospect.com' && loginPassword === 'prospect2026') {
@@ -396,6 +485,13 @@ export default function App() {
     } else {
       toast.error("Invalid credentials. Please use akash@prospect.com / prospect2026");
     }
+  };
+
+  const isServiceNear = (date: any) => {
+    if (!date) return false;
+    const d = new Date(date);
+    const diff = d.getTime() - new Date().getTime();
+    return diff > 0 && diff < 7 * 24 * 60 * 60 * 1000;
   };
 
   const handleLogout = () => {
@@ -580,16 +676,16 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background font-inter">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="space-y-4 text-center">
           <div className="flex justify-center">
             <motion.div 
               animate={{ rotate: 360 }}
               transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-              className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full"
+              className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full"
             />
           </div>
-          <p className="text-foreground font-black uppercase tracking-[0.2em] text-[10px]">Accessing Secure Channels...</p>
+          <p className="text-foreground font-bold uppercase tracking-[0.2em] text-[9px] opacity-40">Initializing Neural Protocol...</p>
         </div>
       </div>
     );
@@ -597,20 +693,16 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-6 font-inter">
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
         <Card className="w-full max-w-sm bg-card border border-border shadow-2xl overflow-hidden rounded-md">
-          <CardHeader className="text-center p-8 space-y-2">
-            <div className="flex justify-center mb-6">
-              <div className="w-14 h-14 bg-primary rounded-md flex items-center justify-center shadow-lg shadow-primary/20">
-                <ShieldCheck className="text-primary-foreground w-7 h-7" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl font-bold tracking-tight text-foreground">Sign in to Prospect.io</CardTitle>
-            <CardDescription className="text-muted-foreground font-medium tracking-normal text-sm">
-              Secured access for lead acquisition
+          <CardHeader className="text-left p-8 sm:p-10 space-y-2">
+            <h1 className="text-3xl font-black tracking-tighter text-foreground uppercase italic mb-4">prospect.io</h1>
+            <CardTitle className="text-2xl font-black tracking-tighter text-foreground uppercase">Access Terminal</CardTitle>
+            <CardDescription className="text-muted-foreground font-medium tracking-tight text-sm">
+              Secured gateway for high-density lead acquisition.
             </CardDescription>
           </CardHeader>
-          <CardContent className="p-8 space-y-4 pt-0">
+          <CardContent className="p-8 sm:p-10 space-y-6 pt-0">
              <div className="space-y-5">
                <div className="space-y-2.5">
                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Email Address</label>
@@ -649,11 +741,11 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen bg-background text-foreground font-inter flex overflow-hidden selection:bg-primary selection:text-primary-foreground">
+    <div className="h-screen bg-background text-foreground flex overflow-hidden selection:bg-primary selection:text-primary-foreground">
       <Toaster position="top-right" expand={true} richColors theme={theme} />
       
       {/* SIDEBAR - Hidden on mobile */}
-      <aside className="hidden lg:flex w-64 bg-card flex-col justify-between shrink-0 border-r border-border shadow-sm relative z-20">
+      <aside className="hidden lg:flex w-64 bg-card flex-col justify-between shrink-0 border-r border-border shadow-sm relative z-20 font-sans">
         <div className="flex flex-col h-full">
           <div className="logo flex items-center justify-between p-6 mb-2">
             <div className="flex items-center gap-2.5">
@@ -678,6 +770,7 @@ export default function App() {
                   { id: 'dashboard', label: 'Monitor', icon: LayoutDashboard },
                   { id: 'search', label: 'Scanner', icon: MapIcon },
                   { id: 'leads', label: 'CRM Leads', icon: ListFilter },
+                  { id: 'portfolio', label: 'Portfolio Vault', icon: Briefcase },
                   { id: 'history', label: 'History', icon: History },
                 ].map((item) => (
                   <li key={item.id}>
@@ -740,11 +833,12 @@ export default function App() {
       </aside>
 
       {/* BOTTOM NAV - Mobile only */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-card border-t border-border flex items-center justify-around px-2 z-50 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-card border-t border-border flex items-center justify-around px-2 z-50 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] font-sans">
         {[
           { id: 'dashboard', label: 'Monitor', icon: LayoutDashboard },
           { id: 'search', label: 'Scanner', icon: MapIcon },
           { id: 'leads', label: 'CRM', icon: ListFilter },
+          { id: 'portfolio', label: 'Clients', icon: Briefcase },
         ].map((item) => (
           <button
             key={item.id}
@@ -821,19 +915,21 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.99 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.99 }}
-                className="space-y-10"
+                className="space-y-6 sm:space-y-10"
               >
-                <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pb-4 border-b border-border/60">
-                  <div>
-                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-foreground mb-1 lg:mb-2 text-left">Dashboard</h1>
-                    <p className="text-muted-foreground font-medium text-xs sm:text-base lg:text-lg text-left">You have <span className="text-primary font-semibold">{listings.filter(l => l.status === 'new').length} new prospects</span> waiting for review.</p>
+                <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pb-6 border-b border-border/60">
+                  <div className="flex-1 min-w-0">
+                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tighter text-foreground mb-1 mr-4 lg:mb-2 text-left uppercase">Neural Dashboard</h1>
+                    <p className="text-muted-foreground font-medium text-[11px] sm:text-sm lg:text-base text-left flex flex-wrap items-center gap-x-2">
+                      Target Acquisition Mode: <span className="text-primary font-bold">{listings.filter(l => l.status === 'new').length} New Prospects</span>
+                    </p>
                   </div>
-                  <div className="flex gap-3 w-full sm:w-auto">
-                    <Button variant="outline" onClick={exportToCSV} className="flex-1 sm:flex-none rounded-md border-border font-bold text-[10px] lg:text-[11px] uppercase tracking-wider h-10 px-4 lg:px-6 bg-card shadow-sm hover:bg-secondary hover:text-foreground transition-all">
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <Button variant="outline" onClick={exportToCSV} className="flex-1 sm:flex-none rounded-md border-border font-bold text-[9px] uppercase tracking-widest h-10 px-4 bg-card shadow-sm hover:bg-secondary transition-all">
                       Export Dataset
                     </Button>
-                    <Button onClick={() => setActiveTab('search')} className="flex-1 sm:flex-none bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 font-bold text-[10px] lg:text-[11px] uppercase tracking-wider px-4 lg:px-8 h-10 rounded-md gap-2 transition-all active:scale-95">
-                      <Plus className="w-4 h-4" /> Acquire
+                    <Button onClick={() => setActiveTab('search')} className="flex-1 sm:flex-none border-none bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 font-bold text-[9px] uppercase tracking-widest px-4 sm:px-6 h-10 rounded-md gap-2 transition-all active:scale-95">
+                      <Plus className="w-3.5 h-3.5" /> Acquire
                     </Button>
                   </div>
                 </header>
@@ -1705,11 +1801,11 @@ export default function App() {
             >
               {!selectedScanId ? (
                 <>
-                  <header className="flex justify-between items-end pb-4 border-b border-border">
-                    <div>
-                      <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em] mb-2">Audit Trails</p>
-                      <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-foreground">Discovery Vault</h1>
-                      <p className="text-muted-foreground font-medium text-[10px] lg:text-xs mt-1">Archived sequence logs of historical business scans.</p>
+                  <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pb-6 border-b border-border">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em] mb-1 sm:mb-2 leading-none">Audit Trails</p>
+                      <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tighter text-foreground uppercase truncate">Discovery Vault</h1>
+                      <p className="text-muted-foreground font-medium text-[11px] sm:text-xs mt-1 truncate">Archived sequence logs of historical business scans.</p>
                     </div>
                   </header>
 
@@ -1889,6 +1985,133 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'portfolio' && (
+            <motion.div 
+              key="portfolio"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-10 lg:space-y-16"
+            >
+              <header className="pb-4 border-b border-border flex items-end justify-between gap-4">
+                <div>
+                   <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em] mb-2 leading-none">Strategic Retention</p>
+                   <h1 className="text-3xl lg:text-4xl font-black tracking-tighter text-foreground uppercase">Portfolio Vault</h1>
+                   <p className="text-muted-foreground font-medium text-sm mt-1">Lifecycle management for active client engagements</p>
+                </div>
+                <div className="flex gap-3">
+                   <div className="px-4 py-2 bg-secondary/50 border border-border rounded flex flex-col items-center">
+                      <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-1">Total Assets</span>
+                      <span className="text-sm font-black text-foreground">{portfolio.length}</span>
+                   </div>
+                   <div className="px-4 py-2 bg-primary/5 border border-primary/20 rounded flex flex-col items-center">
+                      <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none mb-1">Due Soon</span>
+                      <span className="text-sm font-black text-primary">{portfolio.filter(c => isServiceNear(c.nextServiceDate)).length}</span>
+                   </div>
+                </div>
+              </header>
+
+              <div className="grid grid-cols-1 gap-6 pb-20">
+                {portfolio.length === 0 ? (
+                  <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg bg-secondary/20 p-12 text-center space-y-4">
+                    <div className="w-16 h-16 bg-muted/20 rounded-full flex items-center justify-center">
+                       <Briefcase className="w-8 h-8 text-muted-foreground/30" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="font-bold text-lg text-foreground">Vault is Empty</h3>
+                      <p className="text-sm text-muted-foreground max-w-xs mx-auto">Convert verified leads to start tracking project delivery and service cycles.</p>
+                    </div>
+                  </div>
+                ) : (
+                  portfolio.map((client) => (
+                    <Card key={client.id} className={`border-border shadow-sm overflow-hidden bg-card rounded-md ${isServiceNear(client.nextServiceDate) ? 'ring-2 ring-orange-500/50' : ''}`}>
+                      <div className="grid grid-cols-1 lg:grid-cols-4">
+                        <div className="lg:col-span-1 p-6 border-b lg:border-b-0 lg:border-r border-border flex flex-col justify-between space-y-6">
+                           <div className="space-y-3">
+                              <div className="w-12 h-12 bg-foreground text-background rounded flex items-center justify-center text-xl font-black shadow-lg">
+                                 {client.name.charAt(0)}
+                              </div>
+                              <div>
+                                 <h3 className="font-black text-xl tracking-tight text-foreground">{client.name}</h3>
+                                 <p className="text-[10px] font-bold text-primary uppercase tracking-widest mt-1 flex items-center gap-1.5">
+                                    <Badge variant="outline" className="px-1.5 border-primary/30 text-primary text-[8px] bg-primary/5 h-4 uppercase">{client.status}</Badge>
+                                    Active Account
+                                 </p>
+                              </div>
+                           </div>
+                           {client.websiteUrl && (
+                             <a href={client.websiteUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs font-bold text-muted-foreground hover:text-primary transition-colors">
+                               <Globe className="w-3.5 h-3.5" /> Site Live
+                             </a>
+                           )}
+                        </div>
+                        
+                        <div className="lg:col-span-2 p-8 space-y-6">
+                           <div className="space-y-4">
+                              <h4 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] flex items-center gap-2">
+                                 <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> Delivery Summary
+                              </h4>
+                              <p className="text-sm font-bold text-foreground leading-relaxed">{client.workDone}</p>
+                              <p className="text-xs text-muted-foreground italic leading-relaxed">{client.detailedDescription}</p>
+                           </div>
+                           
+                           <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
+                              <div className="space-y-1.5">
+                                 <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">Acquired Date</p>
+                                 <p className="text-xs font-bold text-foreground">{new Date(client.createdAt?.seconds * 1000 || client.createdAt).toLocaleDateString()}</p>
+                              </div>
+                              <div className="space-y-1.5">
+                                 <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">Project ID</p>
+                                 <p className="text-xs font-mono font-bold text-muted-foreground/60">{client.id.slice(0, 8)}</p>
+                              </div>
+                           </div>
+                        </div>
+
+                        <div className="lg:col-span-1 p-6 bg-secondary/10 flex flex-col justify-between gap-6 border-t lg:border-t-0 border-border">
+                           <div className="space-y-4">
+                              <div className="p-3 bg-card border border-border rounded-sm space-y-1 hover:shadow-sm transition-all">
+                                 <div className="flex items-center justify-between">
+                                    <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">Service Expiry</p>
+                                    <Clock className="w-3 h-3 text-muted-foreground/50" />
+                                 </div>
+                                 <p className="text-xs font-bold text-foreground">{new Date(client.expiryDate).toLocaleDateString()}</p>
+                              </div>
+                              
+                              <div className={`p-4 border rounded-sm space-y-2 relative overflow-hidden ${isServiceNear(client.nextServiceDate) ? 'bg-orange-500/10 border-orange-500/20' : 'bg-primary/5 border-primary/20'}`}>
+                                 {isServiceNear(client.nextServiceDate) && (
+                                   <div className="absolute top-0 right-0 p-1">
+                                      <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-ping" />
+                                   </div>
+                                 )}
+                                 <div className="flex items-center justify-between">
+                                    <p className={`text-[9px] font-black uppercase tracking-widest ${isServiceNear(client.nextServiceDate) ? 'text-orange-500' : 'text-primary'}`}>
+                                       Next Cycle Due
+                                    </p>
+                                    <Wrench className={`w-3 h-3 ${isServiceNear(client.nextServiceDate) ? 'text-orange-500' : 'text-primary/50'}`} />
+                                 </div>
+                                 <p className={`text-sm font-black ${isServiceNear(client.nextServiceDate) ? 'text-orange-600 dark:text-orange-400' : 'text-foreground'}`}>
+                                    {new Date(client.nextServiceDate).toLocaleDateString()}
+                                 </p>
+                                 <p className="text-[9px] font-bold opacity-50 uppercase tracking-tighter italic">Recommended maintenance window</p>
+                              </div>
+                           </div>
+                           
+                           <div className="flex flex-col gap-2">
+                              <Button variant="outline" size="sm" className="w-full h-9 rounded border-border bg-card font-black text-[9px] uppercase tracking-widest hover:bg-secondary">
+                                 Manage Assets
+                              </Button>
+                              <Button size="sm" className="w-full h-9 rounded bg-primary text-primary-foreground font-black text-[9px] uppercase tracking-widest shadow-md">
+                                 Renewal Draft
+                              </Button>
+                           </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          )}
+
           {activeTab === 'admin' && profile?.role === 'admin' && (
             <motion.div 
               key="admin"
@@ -2020,18 +2243,55 @@ export default function App() {
                       </section>
 
                       <section className="space-y-8">
-                         <div className="flex items-center justify-between">
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                             <h3 className="text-[10px] lg:text-[11px] font-black text-foreground uppercase tracking-[0.25em]">Tactical Competitor Blueprint</h3>
+                             <div className="flex items-center gap-2 text-muted-foreground font-bold text-[10px] uppercase tracking-widest">
+                                <Trophy className="w-4 h-4" /> Market Dominance
+                             </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                             {selectedLeadForOutreach.competitorBenchmarks && selectedLeadForOutreach.competitorBenchmarks.length > 0 ? (
+                               selectedLeadForOutreach.competitorBenchmarks.map((comp, idx) => (
+                                 <div key={idx} className="p-6 bg-card border border-border rounded shadow-sm hover:shadow-md transition-all group overflow-hidden relative">
+                                    <div className="absolute top-0 right-0 w-16 h-16 bg-primary/5 -mr-8 -mt-8 rounded-full group-hover:scale-150 transition-transform" />
+                                    <h4 className="text-sm font-black text-foreground mb-1">{comp.name}</h4>
+                                    <div className="flex items-center gap-2 mb-4">
+                                       <Badge variant="outline" className="text-[8px] uppercase font-bold text-primary border-primary/20 bg-primary/5">SEO: {comp.seoScore}/10</Badge>
+                                       {comp.website && <span className="text-[9px] font-bold text-muted-foreground truncate max-w-[120px]">{comp.website}</span>}
+                                    </div>
+                                    <div className="p-3 bg-secondary/50 rounded-sm border-l-2 border-primary">
+                                       <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                          <Zap className="w-3 h-3 text-primary" /> Core Advantage
+                                       </p>
+                                       <p className="text-xs text-foreground italic font-medium leading-relaxed">
+                                          "{comp.advantage}"
+                                       </p>
+                                    </div>
+                                 </div>
+                               ))
+                             ) : (
+                               <div className="col-span-2 p-8 bg-secondary/20 border border-dashed border-border rounded flex flex-col items-center justify-center text-center space-y-3">
+                                  <AlertTriangle className="w-8 h-8 text-muted-foreground/30" />
+                                  <p className="text-xs text-muted-foreground font-medium italic">No competitive nodes detected in immediate vicinity.</p>
+                               </div>
+                             )}
+                          </div>
+                      </section>
+
+                      <section className="space-y-8">
+                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                             <h3 className="text-[10px] lg:text-[11px] font-black text-foreground uppercase tracking-[0.25em]">Strategic Benchmarking</h3>
-                            <div className="flex gap-6">
-                               <div className="flex flex-col items-end">
+                            <div className="flex gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-border/30 pt-4 sm:pt-0">
+                               <div className="flex flex-col items-start sm:items-end">
                                   <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-1.5">Market Avg</span>
-                                  <span className="text-sm font-bold text-foreground">
+                                  <span className="text-xs sm:text-sm font-bold text-foreground">
                                     {(listings.filter(l => l.category === selectedLeadForOutreach.category).reduce((acc, curr) => acc + curr.leadScore, 0) / (listings.filter(l => l.category === selectedLeadForOutreach.category).length || 1)).toFixed(1)}%
                                   </span>
                                </div>
-                               <div className="flex flex-col items-end">
-                                  <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none mb-1.5">Target Potential</span>
-                                  <span className="text-sm font-bold text-primary">{selectedLeadForOutreach.leadScore}%</span>
+                               <div className="flex flex-col items-start sm:items-end">
+                                  <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none mb-1.5">Potential</span>
+                                  <span className="text-xs sm:text-sm font-bold text-primary">{selectedLeadForOutreach.leadScore}%</span>
                                </div>
                             </div>
                          </div>
@@ -2180,6 +2440,25 @@ export default function App() {
                             )}
                          </AnimatePresence>
                       </section>
+
+                      <div className="pt-10 lg:pt-14 border-t border-border flex flex-col sm:flex-row gap-6 items-center justify-between">
+                         <div className="space-y-3 max-w-md mx-auto sm:mx-0">
+                            <h4 className="text-xl font-black tracking-tight text-foreground uppercase italic px-4 py-1 bg-primary/5 inline-block">Finalize Engagement</h4>
+                            <p className="text-sm text-muted-foreground font-medium leading-relaxed">
+                               Once the sale is closed and technical deployment is complete, promote this lead to the **Portfolio Vault** to track service cycles and retention.
+                            </p>
+                         </div>
+                         <Button 
+                           variant="outline" 
+                           size="lg"
+                           disabled={selectedLeadForOutreach.status === 'closed'}
+                           onClick={() => setIsPromotionDialogOpen(true)}
+                           className="h-12 px-10 rounded border-primary text-primary font-black text-[11px] uppercase tracking-widest hover:bg-primary hover:text-primary-foreground shadow-lg shadow-primary/5 transition-all active:scale-95 w-full sm:w-auto"
+                         >
+                            <CheckCircle className="w-4 h-4 mr-2" /> 
+                            {selectedLeadForOutreach.status === 'closed' ? 'Contract Active' : 'Promote to Portfolio'}
+                         </Button>
+                      </div>
                    </div>
 
                    <div className="p-8 lg:p-12 bg-secondary/20 space-y-12">
@@ -2243,6 +2522,78 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        <Dialog open={isPromotionDialogOpen} onOpenChange={setIsPromotionDialogOpen}>
+          <DialogContent className="sm:max-w-md bg-card border-border shadow-2xl p-0 overflow-hidden rounded-md">
+            <div className="p-8 space-y-6">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-primary/10 rounded flex items-center justify-center border border-primary/20">
+                   <Briefcase className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">Promote to Client</h2>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest">{selectedLeadForOutreach?.name}</p>
+                </div>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Delivered Services</label>
+                  <Input 
+                    placeholder="e.g. Website Redesign, SEO Audit, GMB Cleanup" 
+                    value={promotionDetails.workDone}
+                    onChange={(e) => setPromotionDetails(prev => ({ ...prev, workDone: e.target.value }))}
+                    className="h-10 border-border bg-background rounded focus:ring-primary/20"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Project Narrative</label>
+                  <textarea 
+                    placeholder="Detailed audit findings and implemented solutions..." 
+                    value={promotionDetails.detailedDescription}
+                    onChange={(e) => setPromotionDetails(prev => ({ ...prev, detailedDescription: e.target.value }))}
+                    className="w-full h-24 p-3 bg-background border border-border rounded text-sm font-medium focus:ring-primary/20 focus:outline-none custom-scrollbar-themed"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Expiraton (Months)</label>
+                    <Input 
+                      type="number" 
+                      value={promotionDetails.expiryMonths}
+                      onChange={(e) => setPromotionDetails(prev => ({ ...prev, expiryMonths: parseInt(e.target.value) }))}
+                      className="h-10 border-border bg-background rounded focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Next Cycle (Months)</label>
+                    <Input 
+                      type="number" 
+                      value={promotionDetails.nextServiceMonths}
+                      onChange={(e) => setPromotionDetails(prev => ({ ...prev, nextServiceMonths: parseInt(e.target.value) }))}
+                      className="h-10 border-border bg-background rounded focus:ring-primary/20"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="bg-secondary/30 p-6 flex flex-row gap-3">
+              <Button 
+                variant="outline" 
+                onClick={() => setIsPromotionDialogOpen(false)}
+                className="flex-1 h-11 border-border font-black text-[10px] uppercase tracking-widest rounded bg-card hover:bg-secondary"
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={promoteLeadToClient}
+                className="flex-1 h-11 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-widest rounded shadow-lg shadow-primary/10 active:scale-95"
+              >
+                Confirm Acquisition
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        
         {/* Global Intelligence Guide */}
         <section className="mt-20 border-t border-border pt-12 pb-24 px-6 lg:px-12 bg-secondary/5 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
@@ -2285,6 +2636,7 @@ export default function App() {
                  <p className="text-[10px] text-primary font-bold uppercase tracking-widest italic">Always verify digital signatures before initiating outreach protocols.</p>
                  <Badge variant="outline" className="bg-primary text-primary-foreground border-none px-3 py-1 text-[9px] font-black uppercase tracking-widest">v1.2 Active</Badge>
               </div>
+           </div>
            </section>
       </main>
     </div>

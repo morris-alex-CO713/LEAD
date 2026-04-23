@@ -44,11 +44,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "akash@prospect.com" && request.auth.token.email_verified == true) ||
-         (request.auth.token.email == "akash.s@cisinlabs.com") ||
-         (request.auth.token.email == "codingdestini435@gmail.com"));
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        request.auth.token.email == "akash@prospect.com" ||
+        request.auth.token.email == "akash.s@cisinlabs.com" ||
+        request.auth.token.email == "codingdestini435@gmail.com"
+      );
     }
 
     function isValidUser(data) {
@@ -65,9 +66,19 @@ service cloud.firestore {
       return data.keys().hasAll(['location', 'keyword', 'timestamp', 'uid']);
     }
 
+    function isValidPortfolioClient(data) {
+      return data.keys().hasAll(['name', 'status', 'createdAt']) &&
+             data.name is string && data.name.size() <= 200 &&
+             data.status in ['active', 'maintenance', 'expired'];
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
 
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -76,7 +87,9 @@ service cloud.firestore {
     }
 
     match /business_listings/{listingId} {
-      allow read: if isAuthenticated();
+      allow list: if isAdmin();
+      allow list: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow get: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
       // Admins can manage all, clients can add their own
       allow create: if isAuthenticated() && isValidListing(request.resource.data) && (request.resource.data.uid == request.auth.uid || isAdmin());
       allow update: if isAuthenticated() && (isAdmin() || (resource.data.uid == request.auth.uid && isValidListing(request.resource.data)));
@@ -84,8 +97,19 @@ service cloud.firestore {
     }
 
     match /scans/{scanId} {
-      allow read: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
+      allow list: if isAdmin();
+      allow list: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow get: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
       allow create: if isAuthenticated() && isValidScan(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    match /portfolio_vault/{clientId} {
+      allow list: if isAdmin();
+      allow list: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow get: if isAuthenticated() && (isAdmin() || resource.data.uid == request.auth.uid);
+      allow create: if isAdmin();
+      allow update: if isAdmin() && isValidPortfolioClient(request.resource.data);
       allow delete: if isAdmin();
     }
   }

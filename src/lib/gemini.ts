@@ -2,6 +2,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+export interface CompetitorBenchmark {
+  name: string;
+  website: string | null;
+  seoScore: number;
+  advantage: string;
+}
+
 export interface BusinessResult {
   name: string;
   address: string;
@@ -24,6 +31,7 @@ export interface BusinessResult {
   };
   leadScore: number; 
   outreachStrategy: string; 
+  competitorBenchmarks?: CompetitorBenchmark[];
 }
 
 export async function searchAndAuditBusinesses(location: string, keyword: string, radius: number = 5, maxResults: number = 10): Promise<BusinessResult[]> {
@@ -39,8 +47,11 @@ export async function searchAndAuditBusinesses(location: string, keyword: string
      - Technical SEO estimation (meta tags, h1 usage).
      - Load speed estimation.
   5. Strategic Scoring:
-     - leadScore (1-100): High score means high potential for digital service sales (e.g. they have many reviews but a terrible/missing website).
+     - leadScore (1-100): High score means high potential for digital service sales (they have reviews but bad website).
      - outreachStrategy: A personalized 2-sentence pitch detailing WHY they need help.
+  6. Competitive Intelligence:
+     - Identification of top 2 ranking competitors in the same city.
+     - competitorBenchmarks: Array of objects with name, website, seoScore (1-10), and "advantage" (one reason why they are better than the target).
  
   Coordinates MUST be precise numbers.
   Provide results in a JSON array. Be exhaustive.`;
@@ -81,7 +92,20 @@ export async function searchAndAuditBusinesses(location: string, keyword: string
                 required: ["seoScore", "mobileFriendly", "loadSpeed"]
               },
               leadScore: { type: Type.NUMBER },
-              outreachStrategy: { type: Type.STRING }
+              outreachStrategy: { type: Type.STRING },
+              competitorBenchmarks: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    website: { type: Type.STRING },
+                    seoScore: { type: Type.NUMBER },
+                    advantage: { type: Type.STRING }
+                  },
+                  required: ["name", "seoScore", "advantage"]
+                }
+              }
             },
             required: ["name", "address", "lat", "lng", "hasWebsite", "isWebsiteGood", "auditComment", "leadScore", "outreachStrategy", "technicalAudit"]
           }

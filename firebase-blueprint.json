@@ -57,6 +57,24 @@
       },
       "required": ["location", "keyword", "timestamp"]
     }
+    "PortfolioClient": {
+      "title": "Portfolio Client",
+      "description": "Store information about a converted client and their delivered projects.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "businessId": { "type": "string", "description": "Reference to the original lead ID." },
+        "name": { "type": "string" },
+        "websiteUrl": { "type": "string" },
+        "workDone": { "type": "string", "description": "Summary of services provided." },
+        "detailedDescription": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date-time", "description": "When the current service/subscription expires." },
+        "nextServiceDate": { "type": "string", "format": "date-time", "description": "Next scheduled maintenance or upsell opportunity." },
+        "status": { "type": "string", "enum": ["active", "maintenance", "expired"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "status", "createdAt"]
+    }
   },
   "firestore": {
     "/business_listings/{listingId}": {
@@ -70,6 +88,10 @@
     "/scans/{scanId}": {
       "schema": "Scan",
       "description": "History of business discovery scans."
+    },
+    "/portfolio_vault/{clientId}": {
+      "schema": "PortfolioClient",
+      "description": "Vault of successfully acquired and served clients."
     }
   }
 }
