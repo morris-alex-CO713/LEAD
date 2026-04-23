@@ -936,58 +936,63 @@ export default function App() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 lg:gap-6">
                   <div className="col-span-1 md:col-span-1 lg:col-span-4 bg-card rounded-md p-6 shadow-sm border border-border relative overflow-hidden group transition-all hover:shadow-md">
-                    <p className="text-muted-foreground font-bold text-[10px] uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                       <BarChart3 className="w-4 h-4 text-primary" /> Pipeline Stats
+                    <p className="text-muted-foreground font-black text-[10px] uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
+                       <BarChart3 className="w-4 h-4 text-primary" /> Acquisition Pipeline
                     </p>
                     <div className="flex justify-between items-end relative z-10">
                         <div>
-                          <h3 className="text-2xl lg:text-3xl font-bold text-foreground mb-0.5 tracking-tight">{listings.length}</h3>
-                          <p className="text-muted-foreground font-bold text-[10px] uppercase tracking-widest">Total Active</p>
+                          <h3 className="text-2xl lg:text-3xl font-black text-foreground mb-0.5 tracking-tight">{listings.length}</h3>
+                          <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest">Active Data Points</p>
                         </div>
                         <div className="text-right">
-                          <h3 className="text-2xl lg:text-3xl font-bold text-foreground mb-0.5 tracking-tight">
-                            {listings.filter(l => l.status === 'qualified').length}
+                          <h3 className="text-2xl lg:text-3xl font-black text-emerald-500 mb-0.5 tracking-tight italic">
+                            {listings.filter(l => l.status === 'qualified' || l.status === 'closed').length}
                           </h3>
-                          <p className="text-muted-foreground font-bold text-[10px] uppercase tracking-widest">Qualified</p>
+                          <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest text-emerald-500/70">Conversion Count</p>
                         </div>
                     </div>
                   </div>
 
                   <div className="col-span-1 md:col-span-1 lg:col-span-4 bg-card rounded-md p-6 shadow-sm border border-border relative overflow-hidden group transition-all hover:shadow-md">
                     <div className="flex justify-between mb-4 relative z-10">
-                       <p className="text-muted-foreground font-bold text-[10px] uppercase tracking-[0.2em] flex items-center gap-2">
-                         <Zap className="w-4 h-4 text-primary" /> Discovery
+                       <p className="text-muted-foreground font-black text-[10px] uppercase tracking-[0.3em] flex items-center gap-2">
+                         <Zap className="w-4 h-4 text-primary" /> Technical Audit Yield
                        </p>
-                       <span className="text-[10px] font-bold text-muted-foreground/30 uppercase tracking-widest">Growth</span>
+                       <span className="text-[9px] font-black text-primary/30 uppercase tracking-widest">Efficiency</span>
                     </div>
                     <div className="flex items-center gap-4 lg:gap-8 relative z-10">
-                        <div>
-                          <h3 className="text-2xl lg:text-3xl font-bold text-foreground mb-0.5 tracking-tight">{scans.length}</h3>
-                          <p className="text-muted-foreground font-bold text-[10px] uppercase tracking-widest">Total Scans</p>
+                        <div className="shrink-0">
+                          <h3 className="text-2xl lg:text-3xl font-black text-foreground mb-0.5 tracking-tight">{scans.length}</h3>
+                          <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest">Scans Deployed</p>
                         </div>
-                        <div className="flex-1 h-1.5 lg:h-2 bg-secondary rounded-full overflow-hidden">
+                        <div className="flex-1 h-3 bg-secondary rounded overflow-hidden p-0.5">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: "70%" }}
-                            transition={{ duration: 1, ease: "easeOut" }}
-                            className="h-full bg-primary rounded-full"
+                            animate={{ width: `${Math.min(100, (scans.length / 50) * 100)}%` }}
+                            transition={{ duration: 1.5, ease: "circOut" }}
+                            className="h-full bg-primary rounded shadow-[0_0_10px_rgba(var(--primary),0.3)]"
                           />
                         </div>
                     </div>
                   </div>
 
-                  <div className="col-span-1 md:col-span-2 lg:col-span-4 bg-primary rounded-md p-6 shadow-xl relative overflow-hidden flex flex-col justify-between border border-primary/20 transition-all hover:scale-[1.01]">
-                    <p className="text-primary-foreground/70 font-bold text-[10px] uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
-                       <Star className="w-4 h-4 text-amber-300" /> Momentum
+                  <div className="col-span-1 md:col-span-2 lg:col-span-4 bg-primary rounded-md p-6 shadow-xl relative overflow-hidden flex flex-col justify-between border border-primary/20 transition-all hover:scale-[1.01] hover:shadow-primary/30">
+                    <p className="text-primary-foreground/70 font-black text-[10px] uppercase tracking-[0.3em] mb-3 flex items-center gap-2">
+                       <ShieldCheck className="w-4 h-4 text-emerald-400" /> Revenue Integrity
                     </p>
-                    <div>
-                      <h3 className="text-3xl font-bold text-primary-foreground flex items-center gap-2 tracking-tighter italic">
-                        24% <ArrowUpRight className="w-6 h-6 text-amber-300" />
+                    <div className="flex items-baseline gap-3">
+                      <h3 className="text-3xl font-black text-primary-foreground flex items-center gap-2 tracking-tighter italic">
+                         {portfolio.length} <span className="text-xs font-medium not-italic opacity-60">Clients</span>
                       </h3>
-                      <p className="text-primary-foreground/70 font-bold text-[10px] uppercase tracking-widest mt-1">Lead Velocity Factor</p>
+                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/10 text-white font-black text-[10px] uppercase tracking-tighter">
+                         Active <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      </div>
                     </div>
-                    {/* Decorative background element */}
-                    <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+                    <p className="text-primary-foreground/70 font-black text-[9px] uppercase tracking-widest mt-2 border-t border-white/10 pt-2">Portfolio Retention Metric</p>
+                    {/* Decorative cyber element */}
+                    <div className="absolute top-2 right-2 opacity-10">
+                       <Star className="w-24 h-24 rotate-12" />
+                    </div>
                   </div>
                 </div>
 
@@ -1049,14 +1054,14 @@ export default function App() {
                     {filteredListings.length === 0 ? (
                       <div className="flex flex-col items-center justify-center p-12 bg-card rounded-md border border-border shadow-sm">
                          <LayoutDashboard className="w-8 h-8 text-muted-foreground/20 mb-4" />
-                         <p className="text-muted-foreground font-bold uppercase tracking-widest text-[10px]">No active data streams</p>
+                         <p className="text-muted-foreground font-black uppercase tracking-widest text-[10px]">No active data streams</p>
                       </div>
                     ) : (
                       filteredListings.map((l) => (
                         <motion.div 
                           layout
                           key={l.id} 
-                          className="group flex items-center justify-between p-3 bg-card border border-border rounded-md hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer relative overflow-hidden"
+                          className="group flex items-center justify-between p-4 bg-card border border-border rounded shadow-sm hover:border-primary transition-all cursor-pointer relative overflow-hidden min-h-[64px]"
                           onClick={() => openLeadDetail(l)}
                         >
                           <div className="flex items-center gap-3">
@@ -1126,9 +1131,10 @@ export default function App() {
                   </div>
                 ) : (
                   <DragDropContext onDragEnd={onDragEnd}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pb-10 overflow-x-auto min-h-[600px] no-scrollbar">
-                      {(['new', 'qualified', 'contacted', 'closed'] as const).map(status => (
-                        <Droppable droppableId={status} key={status}>
+                    <div className="overflow-x-auto no-scrollbar -mx-6 px-6 lg:mx-0 lg:px-0 scroll-smooth">
+                      <div className="flex gap-4 min-w-[1000px] lg:min-w-0 lg:grid lg:grid-cols-4 lg:gap-6 pb-10 min-h-[600px]">
+                        {(['new', 'qualified', 'contacted', 'closed'] as const).map(status => (
+                          <Droppable droppableId={status} key={status}>
                           {(provided, snapshot) => (
                             <div 
                               {...provided.droppableProps}
@@ -1197,6 +1203,7 @@ export default function App() {
                           )}
                         </Droppable>
                       ))}
+                      </div>
                     </div>
                    </DragDropContext>
                 )}
@@ -2068,12 +2075,12 @@ export default function App() {
 
                         <div className="lg:col-span-1 p-6 bg-secondary/10 flex flex-col justify-between gap-6 border-t lg:border-t-0 border-border">
                            <div className="space-y-4">
-                              <div className="p-3 bg-card border border-border rounded-sm space-y-1 hover:shadow-sm transition-all">
+                              <div className="p-3 bg-card border border-border rounded space-y-1 hover:shadow-sm transition-all cursor-default">
                                  <div className="flex items-center justify-between">
                                     <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">Service Expiry</p>
                                     <Clock className="w-3 h-3 text-muted-foreground/50" />
                                  </div>
-                                 <p className="text-xs font-bold text-foreground">{new Date(client.expiryDate).toLocaleDateString()}</p>
+                                 <p className="text-xs font-black text-foreground">{new Date(client.expiryDate).toLocaleDateString()}</p>
                               </div>
                               
                               <div className={`p-4 border rounded-sm space-y-2 relative overflow-hidden ${isServiceNear(client.nextServiceDate) ? 'bg-orange-500/10 border-orange-500/20' : 'bg-primary/5 border-primary/20'}`}>
@@ -2083,15 +2090,18 @@ export default function App() {
                                    </div>
                                  )}
                                  <div className="flex items-center justify-between">
-                                    <p className={`text-[9px] font-black uppercase tracking-widest ${isServiceNear(client.nextServiceDate) ? 'text-orange-500' : 'text-primary'}`}>
-                                       Next Cycle Due
+                                    <p className={`text-[9px] font-black uppercase tracking-widest ${isServiceNear(client.nextServiceDate) ? 'text-orange-500' : 'text-emerald-500'}`}>
+                                       {isServiceNear(client.nextServiceDate) ? 'Urgent Cycle' : 'Healthy Cycle'}
                                     </p>
-                                    <Wrench className={`w-3 h-3 ${isServiceNear(client.nextServiceDate) ? 'text-orange-500' : 'text-primary/50'}`} />
+                                    <Wrench className={`w-3 h-3 ${isServiceNear(client.nextServiceDate) ? 'text-orange-500' : 'text-emerald-500/50'}`} />
                                  </div>
                                  <p className={`text-sm font-black ${isServiceNear(client.nextServiceDate) ? 'text-orange-600 dark:text-orange-400' : 'text-foreground'}`}>
                                     {new Date(client.nextServiceDate).toLocaleDateString()}
                                  </p>
-                                 <p className="text-[9px] font-bold opacity-50 uppercase tracking-tighter italic">Recommended maintenance window</p>
+                                 <div className="mt-1 flex items-center gap-1.5 opacity-50 uppercase tracking-tighter text-[9px] font-bold">
+                                    <div className={`w-1 h-1 rounded-full ${isServiceNear(client.nextServiceDate) ? 'bg-orange-500' : 'bg-emerald-500'}`} />
+                                    {isServiceNear(client.nextServiceDate) ? 'Critical Maintenance Required' : 'Optimized Operational Window'}
+                                 </div>
                               </div>
                            </div>
                            
