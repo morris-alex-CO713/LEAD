@@ -2,6 +2,7 @@ import React from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents, Circle, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Badge } from '@/components/ui/badge';
 
 // Fix for default marker icons in Leaflet with Vite
 // Using CDNs to avoid local asset pathing issues in the prototype environment

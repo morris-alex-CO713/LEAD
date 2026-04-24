@@ -18,3 +18,40 @@ View your app in AI Studio: https://ai.studio/apps/27561c7f-2db0-4e55-a300-d464b
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Authentication Setup
+
+This app now uses **Firebase Authentication** with email/password sign-in.
+
+### First Time Setup:
+
+1. **Enable Email/Password Authentication in Firebase Console:**
+   - Go to [Firebase Console](https://console.firebase.google.com/)
+   - Select your project: `gen-lang-client-0707304351`
+   - Navigate to **Authentication** → **Sign-in method**
+   - Enable **Email/Password** provider
+   - Click **Save**
+
+2. **Create Your Account:**
+   - Run the app (`npm run dev`)
+   - Click **"Need an account? Sign Up"**
+   - Enter your email and password (minimum 6 characters)
+   - Click **"Create Account"**
+
+3. **Sign In:**
+   - Use your registered email and password
+   - Click **"Initialize Access"**
+
+### Important Notes:
+
+- **No more hardcoded credentials** - The old `akash@prospect.com / prospect2026` login has been removed
+- **Real Firebase Authentication** - Your login is now secured by Firebase Auth
+- **Firestore Permissions** - Now properly authenticated, so Firestore operations will work correctly
+- **Persistent Sessions** - Firebase handles session management automatically
+
+### Troubleshooting:
+
+If you get authentication errors:
+- Make sure Email/Password authentication is enabled in Firebase Console
+- Check that your password is at least 6 characters
+- Verify your Firebase configuration in `firebase-applet-config.json`
