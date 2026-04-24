@@ -8,46 +8,27 @@ import {
   User 
 } from 'firebase/auth';
 import { 
-  doc, 
-  setDoc, 
-  getDoc, 
   onSnapshot,
   collection,
   query,
   orderBy,
-  addDoc,
+  doc,
   updateDoc,
-  deleteDoc,
+  addDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import { 
-  OperationType, 
-  handleFirestoreError, 
   testFirestoreConnection 
 } from './lib/firestore-errors';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { 
   Plus, 
-  CheckCircle, 
-  ExternalLink,
-  Trash2,
-  Map as MapIcon,
-  Trophy,
   History,
   LayoutDashboard,
-  ShieldCheck,
-  ChevronRight,
-  User as UserIcon,
-  MapPin,
-  Settings,
-  LogOut,
+  Map as MapIcon,
   Search,
-  Loader2,
   Zap,
-  Activity,
-  BarChart3,
-  Monitor,
   Star,
   ArrowUpRight,
   Globe,
@@ -56,8 +37,6 @@ import {
   PhoneCall,
   MessageSquare,
   ListFilter,
-  TrendingDown,
-  Radio,
   Sun,
   Moon,
   Columns as ColumnsIcon,
@@ -65,7 +44,20 @@ import {
   Briefcase,
   Clock,
   Wrench,
-  AlertTriangle
+  AlertTriangle,
+  User as UserIcon,
+  CheckCircle,
+  Trash2,
+  Trophy,
+  MapPin,
+  ChevronRight,
+  Settings,
+  ExternalLink,
+  Monitor,
+  Activity,
+  ShieldCheck,
+  Loader2,
+  LogOut
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -94,6 +86,18 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
+import Sidebar from './components/Sidebar';
+import BottomNav from './components/BottomNav';
+import StatsGrid from './components/StatsGrid';
+import LeadCard from './components/LeadCard';
+import { FirebaseService } from './services/firebaseService';
+import { 
+  BusinessListing, 
+  PortfolioClient, 
+  ScanHistory,
+  UserProfile
+} from './types';
+
 // --- Constants ---
 const SUGGESTED_NICHES = [
   "Roofing Contractors",
@@ -107,53 +111,6 @@ const SUGGESTED_NICHES = [
   "Pet Grooming",
   "Coffee Roasters"
 ];
-
-// --- Types ---
-interface BusinessListing extends BusinessResult {
-  id: string;
-  uid: string;
-  status: 'new' | 'contacted' | 'qualified' | 'rejected' | 'closed';
-  createdAt: any;
-  connectionDone?: boolean;
-  reachedMode?: 'Email' | 'LinkedIn' | 'Phone' | 'Other';
-  outreachDrafts?: {
-    email?: string;
-    linkedin?: string;
-    lastGenerated?: number;
-  };
-}
-
-interface UserProfile {
-  email: string;
-  role: 'admin' | 'client';
-  displayName: string;
-}
-
-interface ScanHistory {
-  id: string;
-  location: string;
-  keyword: string;
-  count: number;
-  timestamp: any;
-  results: BusinessResult[];
-  radius?: number;
-}
-
-interface PortfolioClient {
-  id: string;
-  uid: string;
-  businessId: string;
-  name: string;
-  websiteUrl: string;
-  workDone: string;
-  detailedDescription: string;
-  expiryDate: any;
-  nextServiceDate: any;
-  status: 'active' | 'maintenance' | 'expired';
-  createdAt: any;
-}
-
-// --- App Component ---
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
@@ -171,6 +128,7 @@ export default function App() {
   const [portfolio, setPortfolio] = useState<PortfolioClient[]>([]);
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [searchLocation, setSearchLocation] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchRadius, setSearchRadius] = useState(5); // Default 5km
@@ -178,6 +136,39 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [previousTab, setPreviousTab] = useState('dashboard');
   const [searchFilter, setSearchFilter] = useState('');
+  const [isClientView, setIsClientView] = useState(false);
+  const [sharedLead, setSharedLead] = useState<BusinessListing | null>(null);
+
+  // Check for shared lead on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedId = params.get('share') || params.get('client');
+    if (sharedId) {
+      setIsClientView(true);
+      // We'll fetch the lead if it's not in our listings (though we might not have it yet)
+    }
+  }, []);
+
+  // Fetch shared lead if in client view
+  useEffect(() => {
+    if (isClientView) {
+      const params = new URLSearchParams(window.location.search);
+      const sharedId = params.get('share') || params.get('client');
+      if (sharedId) {
+        // Try to find in current listings first
+        const found = listings.find(l => l.id === sharedId);
+        if (found) {
+          setSharedLead(found);
+        } else {
+          // If not found, it might be loading or we need to fetch it explicitly if rules allow
+          // For now, if we have the list, and it's not there, we display a message
+          if (listings.length > 0) {
+            // Not found in full list
+          }
+        }
+      }
+    }
+  }, [isClientView, listings]);
   const [dashboardFilter, setDashboardFilter] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<BusinessResult[]>([]);
   
@@ -197,6 +188,7 @@ export default function App() {
   // Outreach & Kanban States
   const [selectedLeadForOutreach, setSelectedLeadForOutreach] = useState<BusinessListing | null>(null);
   const [generatingOutreach, setGeneratingOutreach] = useState(false);
+  const [outreachTone, setOutreachTone] = useState<'professional' | 'aggressive' | 'helpful' | 'curious'>('professional');
   const [activeBoardView, setActiveBoardView] = useState<'list' | 'kanban'>('list');
   const mainContentRef = useRef<HTMLElement>(null);
 
@@ -224,7 +216,14 @@ export default function App() {
     if (!lead) return;
     setGeneratingOutreach(true);
     try {
-      const prompt = `Synthesize a high-conversion, professional personalized outreach sequence for "${lead.name}".
+      const tonePrompts = {
+        professional: "Tone: Executive, strategic, and authoritative.",
+        aggressive: "Tone: Urgent, direct, and highlighting the risk of lost revenue to competitors.",
+        helpful: "Tone: Empathetic, supportive, and positioning yourself as a local partner.",
+        curious: "Tone: Low-pressure, inquisitive, and asking if they are even aware of the technical gaps."
+      };
+
+      const prompt = `Synthesize a high-conversion, personalized outreach sequence for "${lead.name}".
       Target Industry: ${lead.category}
       Location: ${lead.address}
       
@@ -236,7 +235,7 @@ export default function App() {
       Requirements:
       1. One concise, value-first Email centered on fixing their specific technical gaps.
       2. One high-engagement LinkedIn connection request note.
-      3. Tone: Executive, strategic, and authoritative. Avoid generic fluff.`;
+      3. ${tonePrompts[outreachTone]} Avoid generic fluff.`;
 
       const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -501,6 +500,15 @@ export default function App() {
     toast.success("Logged out successfully.");
   };
 
+  const handleRandomSearch = () => {
+    const randomNiche = SUGGESTED_NICHES[Math.floor(Math.random() * SUGGESTED_NICHES.length)];
+    const cities = ["Austin, TX", "Denver, CO", "Phoenix, AZ", "Miami, FL", "Seattle, WA", "Nashville, TN", "Las Vegas, NV"];
+    const randomCity = cities[Math.floor(Math.random() * cities.length)];
+    setSearchKeyword(randomNiche);
+    setSearchLocation(randomCity);
+    toast.info(`Targeting ${randomNiche} in ${randomCity}...`);
+  };
+
   const handleSearch = async () => {
     if (!searchLocation || !searchKeyword) {
       toast.error("Please enter both location and keyword.");
@@ -516,15 +524,16 @@ export default function App() {
         setSearchResults(results);
         setActiveTab('search-results');
 
-        // Log to scan history with ALL results
-        await addDoc(collection(db, 'scans'), {
+        // Log to scan history with ALL results and enhanced metadata
+        await FirebaseService.addScanHistory({
           location: searchLocation,
           keyword: searchKeyword,
           count: results.length,
-          timestamp: serverTimestamp(),
           uid: auth.currentUser?.uid || 'akash-prospect-admin',
           results: results,
-          radius: searchRadius
+          radius: searchRadius,
+          city: searchLocation.split(',')[0].trim(),
+          timestamp: serverTimestamp()
         });
       }
     } catch (e) {
@@ -572,75 +581,71 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const saveListing = async (biz: BusinessResult) => {
-    if (!user) return;
+  const saveListing = async (biz: BusinessResult, silent: boolean = false) => {
+    if (!user) {
+      if (!silent) toast.error("Authentication required for persistence.");
+      return;
+    }
     try {
-      await addDoc(collection(db, 'business_listings'), {
-        ...biz,
-        uid: auth.currentUser?.uid || 'akash-prospect-admin',
-        status: 'new',
-        createdAt: serverTimestamp(),
-        connectionDone: false
-      });
-      toast.success("Lead saved to dashboard!");
-    } catch (e) {
-      handleFirestoreError(e, OperationType.CREATE, 'business_listings');
+      await FirebaseService.saveListing(biz);
+      if (!silent) toast.success(`${biz.name} secured.`);
+    } catch (err) {
+      if (!silent) toast.error(`Failed to save ${biz.name}`);
+    }
+  };
+
+  const syncAllToCRM = async (results: BusinessResult[]) => {
+    if (!user) return toast.error("Authenticate to sync data.");
+    setIsSyncing(true);
+    try {
+      const unsaved = results.filter(r => !listings.some(l => l.name === r.name && l.address === r.address));
+      if (unsaved.length === 0) {
+        toast.info("All selected leads are already in CRM.");
+        return;
+      }
+      await Promise.all(unsaved.map(r => saveListing(r, true)));
+      toast.success(`${unsaved.length} new leads synchronized with CRM.`);
+    } catch (err) {
+      toast.error("Partial synchronization failure.");
+    } finally {
+      setIsSyncing(false);
     }
   };
 
   const addManualLead = async () => {
     if (!manualLead.name) return toast.error("Business name is required");
-    try {
-      const bizData: any = {
-        ...manualLead,
-        socialLinks: [],
-        rating: null,
-        reviewsCount: 0,
-        hasWebsite: !!manualLead.website,
-        isWebsiteGood: true,
-        auditComment: "Manually added lead",
-        technicalAudit: { seoScore: 10, mobileFriendly: true, loadSpeed: 'Fast' },
-        leadScore: 50,
-        outreachStrategy: "Manual entry - research needed.",
-        uid: auth.currentUser?.uid || 'akash-prospect-admin',
-        status: 'new',
-        createdAt: serverTimestamp(),
-        connectionDone: false
-      };
-      await addDoc(collection(db, 'business_listings'), bizData);
-      setIsManualAddOpen(false);
-      setManualLead({ name: '', address: '', category: '', website: '', phone: '', email: '' });
-      toast.success("Manual lead added!");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'business_listings');
-    }
+    const bizData: any = {
+      ...manualLead,
+      socialLinks: [],
+      rating: null,
+      reviewsCount: 0,
+      hasWebsite: !!manualLead.website,
+      isWebsiteGood: true,
+      auditComment: "Manually added lead",
+      technicalAudit: { seoScore: 10, mobileFriendly: true, loadSpeed: 'Fast' },
+      leadScore: 50,
+      outreachStrategy: "Manual entry - research needed.",
+      connectionDone: false
+    };
+    await FirebaseService.saveListing(bizData);
+    setIsManualAddOpen(false);
+    setManualLead({ name: '', address: '', category: '', website: '', phone: '', email: '' });
+    toast.success("Manual lead added!");
   };
 
   const updateStatus = async (id: string, status: BusinessListing['status']) => {
-    try {
-      await updateDoc(doc(db, 'business_listings', id), { status });
-      toast.success(`Status updated to ${status}`);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, 'business_listings');
-    }
+    await FirebaseService.updateStatus(id, status);
+    toast.success(`Status updated to ${status}`);
   };
 
   const deleteListing = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, 'business_listings', id));
-      toast.success("Lead removed.");
-    } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, 'business_listings');
-    }
+    await FirebaseService.deleteListing(id);
+    toast.success("Lead removed.");
   };
 
   const updateLeadStatus = async (id: string, updates: Partial<BusinessListing>) => {
-    try {
-      await updateDoc(doc(db, 'business_listings', id), updates);
-      toast.success("Lead updated successfully.");
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, 'business_listings');
-    }
+    await FirebaseService.updateLead(id, updates);
+    toast.success("Lead updated successfully.");
   };
 
   const filteredListings = listings.filter(l => {
@@ -674,6 +679,114 @@ export default function App() {
     toast.success("CSV Exported successfully!");
   };
 
+  if (isClientView) {
+    if (!sharedLead && listings.length === 0) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="space-y-4 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Synchronizing Shared Audit...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!sharedLead) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background p-6">
+          <Card className="max-w-md w-full border-border bg-card">
+            <CardHeader className="text-center">
+              <AlertTriangle className="w-12 h-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="text-xl font-bold uppercase">Audit Not Found</CardTitle>
+              <CardDescription>The shared link may have expired or is invalid.</CardDescription>
+            </CardHeader>
+            <CardFooter>
+              <Button className="w-full" onClick={() => window.location.href = '/'}>Return Home</Button>
+            </CardFooter>
+          </Card>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-background text-foreground selection:bg-primary selection:text-primary-foreground">
+        <Toaster position="top-right" expand={true} richColors theme={theme} />
+        <div className="max-w-5xl mx-auto p-4 sm:p-8 lg:p-12 space-y-12 pb-32">
+          <header className="flex flex-col sm:flex-row items-center justify-between gap-6 border-b border-border pb-8">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-foreground text-background flex items-center justify-center text-2xl font-black rounded">
+                {sharedLead.name.charAt(0)}
+              </div>
+              <div>
+                <h1 className="text-3xl font-black tracking-tighter uppercase">{sharedLead.name}</h1>
+                <p className="text-muted-foreground font-medium flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-primary" /> {sharedLead.address}
+                </p>
+              </div>
+            </div>
+            <div className="text-center sm:text-right">
+              <div className="text-5xl font-black text-primary tracking-tighter">{sharedLead.leadScore}</div>
+              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mt-1">Optimization Deficit</p>
+            </div>
+          </header>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <section className="space-y-6">
+              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Critical Vulnerabilities</h3>
+              <div className="space-y-4">
+                <div className="p-6 bg-secondary/20 rounded border border-border">
+                  <p className="text-[10px] font-bold uppercase tracking-widest mb-2">SEO Status</p>
+                  <div className="flex items-center justify-between font-black text-2xl">
+                    <span>{sharedLead.technicalAudit.seoScore}/10</span>
+                    <Badge variant={sharedLead.technicalAudit.seoScore > 7 ? "secondary" : "destructive"} className="uppercase font-bold text-[9px]">
+                      {sharedLead.technicalAudit.seoScore > 7 ? "Healthy" : "Critical"}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="p-6 bg-secondary/20 rounded border border-border">
+                  <p className="text-[10px] font-bold uppercase tracking-widest mb-2">Mobile Performance</p>
+                  <div className="flex items-center justify-between font-black text-2xl uppercase">
+                    <span>{sharedLead.technicalAudit.loadSpeed}</span>
+                    <Badge variant="outline" className="border-primary/20 text-primary uppercase font-bold text-[9px]">Latency Audit</Badge>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-6">
+              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Digital Infrastructure</h3>
+              <div className="p-8 bg-foreground text-background rounded shadow-2xl space-y-4">
+                <div className="flex items-center gap-3">
+                  <Activity className="w-5 h-5 text-lime-400" />
+                  <h4 className="font-bold text-lg">System Assessment</h4>
+                </div>
+                <p className="text-sm font-medium leading-relaxed italic opacity-80">
+                  "{sharedLead.auditComment}"
+                </p>
+              </div>
+            </section>
+          </div>
+
+          <section className="space-y-8">
+             <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Strategic Opportunity</h3>
+             <div className="p-10 border-2 border-dashed border-border rounded-lg text-center space-y-6">
+                <div className="max-w-2xl mx-auto space-y-4">
+                   <h4 className="text-2xl font-black tracking-tight uppercase">Implementation Required</h4>
+                   <p className="text-muted-foreground font-medium">To resolve these technical gaps and secure your local rankings, a strategic infrastructure upgrade is recommended.</p>
+                </div>
+             </div>
+          </section>
+
+          <footer className="fixed bottom-0 left-0 w-full p-6 bg-card border-t border-border backdrop-blur-md z-50 flex items-center justify-center">
+             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.3em] flex items-center gap-4">
+               Audit Powered by PROSPECT.IO <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Precision Acquisition Engine
+             </p>
+          </footer>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -696,8 +809,8 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-background p-6">
         <Card className="w-full max-w-sm bg-card border border-border shadow-2xl overflow-hidden rounded-md">
           <CardHeader className="text-left p-8 sm:p-10 space-y-2">
-            <h1 className="text-3xl font-black tracking-tighter text-foreground uppercase italic mb-4">prospect.io</h1>
-            <CardTitle className="text-2xl font-black tracking-tighter text-foreground uppercase">Access Terminal</CardTitle>
+            <h1 className="text-3xl font-bold tracking-tighter text-foreground uppercase italic mb-4">prospect.io</h1>
+            <CardTitle className="text-2xl font-bold tracking-tighter text-foreground uppercase">Access Terminal</CardTitle>
             <CardDescription className="text-muted-foreground font-medium tracking-tight text-sm">
               Secured gateway for high-density lead acquisition.
             </CardDescription>
@@ -745,120 +858,22 @@ export default function App() {
       <Toaster position="top-right" expand={true} richColors theme={theme} />
       
       {/* SIDEBAR - Hidden on mobile */}
-      <aside className="hidden lg:flex w-64 bg-card flex-col justify-between shrink-0 border-r border-border shadow-sm relative z-20 font-sans">
-        <div className="flex flex-col h-full">
-          <div className="logo flex items-center justify-between p-6 mb-2">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-primary rounded flex items-center justify-center shrink-0 shadow-lg shadow-primary/20">
-                <Zap className="text-primary-foreground w-4 h-4" />
-              </div>
-              <span className="text-lg font-bold tracking-tight text-foreground italic">prospect.io</span>
-            </div>
-            <button 
-              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-              className="w-8 h-8 flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-            </button>
-          </div>
-
-          <nav className="flex-1 px-3 space-y-4 pt-2">
-            <div>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] mb-2 px-3">General</p>
-              <ul className="space-y-1">
-                {[
-                  { id: 'dashboard', label: 'Monitor', icon: LayoutDashboard },
-                  { id: 'search', label: 'Scanner', icon: MapIcon },
-                  { id: 'leads', label: 'CRM Leads', icon: ListFilter },
-                  { id: 'portfolio', label: 'Portfolio Vault', icon: Briefcase },
-                  { id: 'history', label: 'History', icon: History },
-                ].map((item) => (
-                  <li key={item.id}>
-                    <button 
-                      onClick={() => setActiveTab(item.id)}
-                      className={`flex items-center gap-3 w-full text-left text-sm font-semibold rounded-md px-3 py-2 transition-all ${
-                        activeTab === item.id 
-                          ? 'bg-primary/10 text-primary' 
-                          : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                      }`}
-                    >
-                      <item.icon className={`w-4 h-4 ${activeTab === item.id ? 'text-primary' : 'text-muted-foreground'}`} />
-                      {item.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {profile?.role === 'admin' && (
-               <div>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] mb-2 px-3">Administration</p>
-                  <ul className="space-y-1">
-                    <li>
-                      <button 
-                        onClick={() => setActiveTab('admin')}
-                        className={`flex items-center gap-3 w-full text-left text-sm font-semibold rounded-md px-3 py-2 transition-all ${
-                          activeTab === 'admin' 
-                            ? 'bg-primary/10 text-primary' 
-                            : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                        }`}
-                      >
-                        <Settings className={`w-4 h-4 ${activeTab === 'admin' ? 'text-primary' : 'text-muted-foreground'}`} />
-                        System Config
-                      </button>
-                    </li>
-                  </ul>
-               </div>
-            )}
-          </nav>
-
-          <div className="p-4 border-t border-border bg-secondary/30">
-             <div className="flex items-center gap-3 px-2 mb-4">
-              <div className="w-9 h-9 rounded-full bg-card flex items-center justify-center shrink-0 border border-border shadow-sm">
-                 <UserIcon className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-foreground truncate tracking-tight">{profile?.displayName?.split(' ')[0]} Admin</span>
-                <span className="text-[9px] font-bold text-primary uppercase tracking-wider truncate">Pro Access License</span>
-              </div>
-            </div>
-            <button 
-              onClick={handleLogout} 
-              className="flex items-center gap-3 w-full text-muted-foreground hover:text-destructive font-bold text-xs px-3 py-2 rounded-md hover:bg-destructive/10 transition-all focus:outline-none"
-            >
-              <LogOut className="w-3.5 h-3.5" /> Terminal Exit
-            </button>
-          </div>
-        </div>
-      </aside>
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        theme={theme} 
+        setTheme={setTheme} 
+        profile={profile} 
+        onLogout={handleLogout} 
+      />
 
       {/* BOTTOM NAV - Mobile only */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-card border-t border-border flex items-center justify-around px-2 z-50 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] font-sans">
-        {[
-          { id: 'dashboard', label: 'Monitor', icon: LayoutDashboard },
-          { id: 'search', label: 'Scanner', icon: MapIcon },
-          { id: 'leads', label: 'CRM', icon: ListFilter },
-          { id: 'portfolio', label: 'Clients', icon: Briefcase },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id)}
-            className={`flex flex-col items-center justify-center gap-1 min-w-[64px] h-full transition-all ${
-              activeTab === item.id ? 'text-primary' : 'text-muted-foreground'
-            }`}
-          >
-            <item.icon className="w-5 h-5" />
-            <span className="text-[10px] font-bold uppercase tracking-tight">{item.label}</span>
-          </button>
-        ))}
-        <button
-          onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-          className="flex flex-col items-center justify-center gap-1 min-w-[64px] h-full text-muted-foreground hover:text-primary transition-all"
-        >
-          {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-          <span className="text-[10px] font-bold uppercase tracking-tight">Theme</span>
-        </button>
-      </div>
+      <BottomNav 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        theme={theme} 
+        setTheme={setTheme} 
+      />
 
       {/* Extraction Modal */}
       <Dialog open={searching} onOpenChange={setSearching}>
@@ -910,16 +925,17 @@ export default function App() {
       <main ref={mainContentRef} className={`flex-1 overflow-y-auto mb-16 lg:mb-0 ${activeTab === 'lead-detail' ? 'p-0' : 'p-4 sm:p-6 lg:p-12'}`}>
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
+            <div className="space-y-12">
             <motion.div 
                 key="dashboard"
                 initial={{ opacity: 0, scale: 0.99 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.99 }}
-                className="space-y-6 sm:space-y-10"
+                className="space-y-6 sm:space-y-10 focus:outline-none"
               >
                 <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pb-6 border-b border-border/60">
                   <div className="flex-1 min-w-0">
-                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tighter text-foreground mb-1 mr-4 lg:mb-2 text-left uppercase">Neural Dashboard</h1>
+                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tighter text-foreground mb-1 mr-4 lg:mb-2 text-left uppercase">Neural Dashboard</h1>
                     <p className="text-muted-foreground font-medium text-[11px] sm:text-sm lg:text-base text-left flex flex-wrap items-center gap-x-2">
                       Target Acquisition Mode: <span className="text-primary font-bold">{listings.filter(l => l.status === 'new').length} New Prospects</span>
                     </p>
@@ -934,67 +950,12 @@ export default function App() {
                   </div>
                 </header>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 lg:gap-6">
-                  <div className="col-span-1 md:col-span-1 lg:col-span-4 bg-card rounded-md p-6 shadow-sm border border-border relative overflow-hidden group transition-all hover:shadow-md">
-                    <p className="text-muted-foreground font-black text-[10px] uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
-                       <BarChart3 className="w-4 h-4 text-primary" /> Acquisition Pipeline
-                    </p>
-                    <div className="flex justify-between items-end relative z-10">
-                        <div>
-                          <h3 className="text-2xl lg:text-3xl font-black text-foreground mb-0.5 tracking-tight">{listings.length}</h3>
-                          <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest">Active Data Points</p>
-                        </div>
-                        <div className="text-right">
-                          <h3 className="text-2xl lg:text-3xl font-black text-emerald-500 mb-0.5 tracking-tight italic">
-                            {listings.filter(l => l.status === 'qualified' || l.status === 'closed').length}
-                          </h3>
-                          <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest text-emerald-500/70">Conversion Count</p>
-                        </div>
-                    </div>
-                  </div>
-
-                  <div className="col-span-1 md:col-span-1 lg:col-span-4 bg-card rounded-md p-6 shadow-sm border border-border relative overflow-hidden group transition-all hover:shadow-md">
-                    <div className="flex justify-between mb-4 relative z-10">
-                       <p className="text-muted-foreground font-black text-[10px] uppercase tracking-[0.3em] flex items-center gap-2">
-                         <Zap className="w-4 h-4 text-primary" /> Technical Audit Yield
-                       </p>
-                       <span className="text-[9px] font-black text-primary/30 uppercase tracking-widest">Efficiency</span>
-                    </div>
-                    <div className="flex items-center gap-4 lg:gap-8 relative z-10">
-                        <div className="shrink-0">
-                          <h3 className="text-2xl lg:text-3xl font-black text-foreground mb-0.5 tracking-tight">{scans.length}</h3>
-                          <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest">Scans Deployed</p>
-                        </div>
-                        <div className="flex-1 h-3 bg-secondary rounded overflow-hidden p-0.5">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, (scans.length / 50) * 100)}%` }}
-                            transition={{ duration: 1.5, ease: "circOut" }}
-                            className="h-full bg-primary rounded shadow-[0_0_10px_rgba(var(--primary),0.3)]"
-                          />
-                        </div>
-                    </div>
-                  </div>
-
-                  <div className="col-span-1 md:col-span-2 lg:col-span-4 bg-primary rounded-md p-6 shadow-xl relative overflow-hidden flex flex-col justify-between border border-primary/20 transition-all hover:scale-[1.01] hover:shadow-primary/30">
-                    <p className="text-primary-foreground/70 font-black text-[10px] uppercase tracking-[0.3em] mb-3 flex items-center gap-2">
-                       <ShieldCheck className="w-4 h-4 text-emerald-400" /> Revenue Integrity
-                    </p>
-                    <div className="flex items-baseline gap-3">
-                      <h3 className="text-3xl font-black text-primary-foreground flex items-center gap-2 tracking-tighter italic">
-                         {portfolio.length} <span className="text-xs font-medium not-italic opacity-60">Clients</span>
-                      </h3>
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/10 text-white font-black text-[10px] uppercase tracking-tighter">
-                         Active <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      </div>
-                    </div>
-                    <p className="text-primary-foreground/70 font-black text-[9px] uppercase tracking-widest mt-2 border-t border-white/10 pt-2">Portfolio Retention Metric</p>
-                    {/* Decorative cyber element */}
-                    <div className="absolute top-2 right-2 opacity-10">
-                       <Star className="w-24 h-24 rotate-12" />
-                    </div>
-                  </div>
-                </div>
+                <StatsGrid 
+                  listingCount={listings.length}
+                  conversionCount={listings.filter(l => l.status === 'qualified' || l.status === 'closed').length}
+                  scanCount={scans.length}
+                  portfolioCount={portfolio.length}
+                />
 
                 <div className="space-y-8 pt-6">
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-border/60">
@@ -1058,74 +1019,11 @@ export default function App() {
                       </div>
                     ) : (
                       filteredListings.map((l) => (
-                        <motion.div 
-                          layout
+                        <LeadCard 
                           key={l.id} 
-                          className="group flex items-center justify-between p-4 bg-card border border-border rounded shadow-sm hover:border-primary transition-all cursor-pointer relative overflow-hidden min-h-[64px]"
-                          onClick={() => openLeadDetail(l)}
-                        >
-                          <div className="flex items-center gap-3">
-                             <div 
-                               className={`w-9 h-9 rounded flex items-center justify-center shrink-0 border border-border transition-all ${
-                                 l.status === 'qualified' ? 'bg-emerald-500/10 text-emerald-500' :
-                                 l.status === 'rejected' ? 'bg-destructive/10 text-destructive' :
-                                 l.status === 'contacted' ? 'bg-primary/10 text-primary' : 
-                                 l.status === 'closed' ? 'bg-blue-500/10 text-blue-500' :
-                                 'bg-secondary text-muted-foreground'
-                               } ${l.website ? 'hover:scale-105 hover:shadow-md cursor-pointer active:scale-95' : ''}`}
-                               onClick={(e) => {
-                                 if (l.website) {
-                                    e.stopPropagation();
-                                    window.open(l.website, '_blank');
-                                 }
-                               }}
-                             >
-                                {l.status === 'qualified' ? <CheckCircle className="w-5 h-5" /> :
-                                 l.status === 'rejected' ? <Trash2 className="w-5 h-5" /> :
-                                 l.status === 'contacted' ? <MessageSquare className="w-5 h-5" /> : 
-                                 l.status === 'closed' ? <Trophy className="w-5 h-5" /> :
-                                 <UserIcon className="w-5 h-5" />}
-                             </div>
-                             <div>
-                                <h4 className="font-bold text-foreground text-sm tracking-tight flex items-center gap-2">
-                                  {l.name}
-                                  <Badge variant="outline" className="text-[8px] font-black px-1 py-0 uppercase border-none bg-secondary/50">
-                                    {l.status}
-                                  </Badge>
-                                  {l.rating && (
-                                    <span className="flex items-center gap-1 text-[8px] text-amber-500 bg-amber-500/10 px-1 py-0.5 rounded font-black border border-amber-500/20">
-                                      <Star className="w-2.5 h-2.5 fill-current" /> {l.rating}
-                                    </span>
-                                  )}
-                                </h4>
-                                <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                                   {l.category} <span className="w-1 h-1 bg-border rounded-full" /> {l.address}
-                                </p>
-                             </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 lg:gap-6">
-                             <div className="hidden sm:flex items-center gap-3">
-                               <div className="flex flex-col items-end">
-                                 <div className="flex items-center gap-2 mb-0.5">
-                                   <div className={`w-1.5 h-1.5 rounded-full ${
-                                     l.hasWebsite ? (l.isWebsiteGood ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-destructive'
-                                   }`} />
-                                   <span className={`text-[9px] font-bold uppercase tracking-wider ${
-                                     l.hasWebsite ? (l.isWebsiteGood ? 'text-emerald-500' : 'text-amber-500') : 'text-destructive'
-                                   }`}>
-                                      {l.hasWebsite ? (l.isWebsiteGood ? 'Optimized' : 'Legacy') : 'Offline'}
-                                   </span>
-                                 </div>
-                                 <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">{l.leadScore} Score</p>
-                               </div>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                               <ArrowUpRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-primary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
-                            </div>
-                          </div>
-                       </motion.div>
+                          listing={l} 
+                          onClick={() => openLeadDetail(l)} 
+                        />
                       ))
                     )}
                   </div>
@@ -1159,40 +1057,17 @@ export default function App() {
                               <div className="flex flex-col gap-3 h-full">
                                 {listings.filter(l => l.status === status).map((biz, index) => {
                                   return (
-                                    // @ts-expect-error - key is required by React but not in DraggableProps
                                     <Draggable draggableId={biz.id} index={index} key={biz.id}>
                                       {(provided, snapshot) => (
-                                        <div
-                                          ref={provided.innerRef}
-                                          {...provided.draggableProps}
-                                          {...provided.dragHandleProps}
+                                        <LeadCard 
+                                          listing={biz} 
                                           onClick={() => openLeadDetail(biz)}
-                                          className={`bg-card p-4 rounded-sm border border-border shadow-sm hover:shadow-md hover:border-primary/20 transition-all cursor-pointer group relative overflow-hidden ${snapshot.isDragging ? 'shadow-2xl border-primary scale-[1.02] z-50' : ''}`}
-                                        >
-                                          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-primary/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                                          <h5 className="font-bold text-xs text-foreground truncate mb-1 tracking-tight">{biz.name}</h5>
-                                          <div className="flex items-center justify-between mb-4">
-                                            <p className="text-[9px] text-muted-foreground font-medium truncate">{biz.category}</p>
-                                            <div className={`px-1 rounded text-[8px] font-black ${biz.technicalAudit.seoScore > 7 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                              {biz.technicalAudit.seoScore}/10
-                                            </div>
-                                          </div>
-                                          
-                                          <div className="flex items-center justify-between pt-3 border-t border-border/50 bg-secondary/5 -mx-4 px-4 mt-auto">
-                                            <div className="flex items-center gap-3">
-                                              <div className="flex flex-col">
-                                                <span className="text-[8px] font-black text-primary uppercase tracking-tighter leading-none">{biz.leadScore}</span>
-                                                <span className="text-[6px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">Propensity</span>
-                                              </div>
-                                              <div className="w-[1px] h-4 bg-border/50" />
-                                              <div className="flex flex-col">
-                                                <span className="text-[8px] font-black text-foreground uppercase tracking-tighter leading-none">{biz.technicalAudit.loadSpeed.replace('s', '')}s</span>
-                                                <span className="text-[6px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">Latency</span>
-                                              </div>
-                                            </div>
-                                            {biz.website && <Globe className="w-2.5 h-2.5 text-muted-foreground/30" />}
-                                          </div>
-                                        </div>
+                                          draggableProps={provided.draggableProps}
+                                          dragHandleProps={provided.dragHandleProps}
+                                          innerRef={provided.innerRef}
+                                          isDragging={snapshot.isDragging}
+                                          isKanban={true}
+                                        />
                                       )}
                                     </Draggable>
                                   );
@@ -1207,161 +1082,218 @@ export default function App() {
                     </div>
                    </DragDropContext>
                 )}
-                </motion.div>
-              )}
+            </motion.div>
+
+            {/* Operational Intelligence Protocol - Only on Dashboard */}
+            <section className="mt-12 border-t border-border pt-12 pb-12 relative overflow-hidden">
+               <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
+               <div className="max-w-4xl">
+                  <div className="flex items-center gap-3 mb-8">
+                     <div className="w-8 h-8 rounded bg-primary/10 border border-primary/20 flex items-center justify-center">
+                        <ShieldCheck className="w-4 h-4 text-primary" />
+                     </div>
+                     <h2 className="text-sm font-bold text-foreground uppercase tracking-[0.3em]">Operational Intelligence Protocol</h2>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+                     <div className="space-y-4">
+                        <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                           <Search className="w-3 h-3" /> Acquisition
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
+                           Deploy sensors via the <b>Satellite Scanner</b> to identify local businesses. Our Gemini-powered engine audits their digital infrastructure in real-time.
+                        </p>
+                     </div>
+                     <div className="space-y-4">
+                        <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                           <Zap className="w-3 h-3" /> Evaluation
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
+                           Review <b>Propensity Scores</b>. A score above 7 indicates a high probability of technical debt and immediate need for infrastructure upgrades.
+                        </p>
+                     </div>
+                     <div className="space-y-4">
+                        <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                           <MessageSquare className="w-3 h-3" /> Execution
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
+                           Save leads to your <b>CRM</b> to unlock personalized outreach sequences. Use the <b>Lead detail</b> view to generate AI-tailored communication.
+                        </p>
+                     </div>
+                  </div>
+
+                  <div className="mt-12 p-4 rounded bg-primary/5 border border-primary/10 flex flex-col md:flex-row items-center justify-between gap-4">
+                     <p className="text-[10px] text-primary font-bold uppercase tracking-widest italic">Always verify digital signatures before initiating outreach protocols.</p>
+                     <Badge variant="outline" className="bg-primary text-primary-foreground border-none px-3 py-1 text-[9px] font-black uppercase tracking-widest">v1.2 Active</Badge>
+                  </div>
+               </div>
+            </section>
+            </div>
+          )}
+
 
               {activeTab === 'search' && (
-                <motion.div 
+            <motion.div 
               key="search"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="max-w-6xl mx-auto space-y-10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 lg:left-64 flex flex-col h-screen overflow-hidden z-[40]"
             >
-                <header className="text-left space-y-1 sm:space-y-1.5">
-                 <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]">Business Discovery</p>
-                 <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-foreground">Acquisition Engine</h1>
-                 <p className="text-muted-foreground font-medium text-xs sm:text-base lg:text-lg max-w-2xl">
-                   Identify high-potential leads with legacy digital footprints across any geographic region.
-                 </p>
-               </header>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-7">
-                  <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden relative group">
-                    <div className="p-5 border-b border-border flex justify-between items-center bg-card relative z-10">
-                       <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 bg-primary rounded-md flex items-center justify-center shadow-md">
-                             <MapIcon className="w-4 h-4 text-primary-foreground" />
-                          </div>
-                          <div>
-                             <h4 className="font-bold text-foreground text-sm tracking-tight">Geo-Targeting</h4>
-                             <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Focus coordinates</p>
-                          </div>
-                       </div>
-                       <Badge variant="secondary" className="font-bold text-[9px] tracking-widest px-3 py-1">v2.4 EXTRACTION</Badge>
-                    </div>
-                    <div className="relative h-[380px]">
-                       <BusinessSelectorMap 
-                         lat={selectedLat} 
-                         lng={selectedLng} 
-                         radius={searchRadius}
-                         onSelect={(lat, lng) => {
-                           setSelectedLat(lat);
-                           setSelectedLng(lng);
-                           if(!searchLocation) setSearchLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-                         }} 
+              {/* Overlay Search Box (Floating) */}
+              <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex flex-col sm:flex-row gap-2 w-full max-w-[90%] sm:max-w-4xl pointer-events-none">
+                 <div className="flex-1 bg-card/80 backdrop-blur-xl border border-border/50 shadow-2xl rounded-lg p-4 pointer-events-auto flex flex-col sm:flex-row gap-3">
+                    <div className="flex-1 relative">
+                       <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                       <Input 
+                         placeholder="Location..." 
+                         value={searchLocation}
+                         onChange={(e) => setSearchLocation(e.target.value)}
+                         className="pl-9 h-10 border-none bg-secondary/50 font-bold focus-visible:ring-0"
                        />
-                       <div className="absolute bottom-6 left-6 right-6">
-                          <div className="bg-card/90 backdrop-blur-md p-3.5 rounded-lg border border-border shadow-lg flex items-center justify-between">
-                             <div className="flex items-center gap-3">
-                                <MapPin className="text-primary w-4 h-4" />
-                                <span className="font-bold text-foreground text-xs tracking-tight truncate max-w-[200px]">
-                                   {selectedLat ? `${selectedLat.toFixed(6)}, ${selectedLng.toFixed(6)}` : "Deploy Marker to Target"}
-                                </span>
-                             </div>
-                             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                          </div>
-                       </div>
                     </div>
-                  </div>
-                </div>
-
-                <div className="lg:col-span-5 space-y-5">
-                  <div className="bg-card rounded-lg p-5 shadow-sm border border-border">
-                    <div className="space-y-6">
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Target Location</label>
-                          <Input 
-                            placeholder="e.g. Austin, TX" 
-                            value={searchLocation}
-                            onChange={(e) => setSearchLocation(e.target.value)}
-                            className="h-11 border-border rounded-md font-bold px-5 bg-secondary focus:bg-card transition-all"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Market Vertical</label>
-                          <Input 
-                            placeholder="e.g. Plumbers" 
-                            value={searchKeyword}
-                            onChange={(e) => setSearchKeyword(e.target.value)}
-                            className="h-11 border-border rounded-md font-bold px-5 bg-secondary focus:bg-card transition-all"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="space-y-1.5">
-                              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Radius (KM)</label>
-                              <Input 
-                                type="number"
-                                placeholder="5" 
-                                value={searchRadius}
-                                onChange={(e) => setSearchRadius(Number(e.target.value))}
-                                className="h-11 border-border rounded-md font-bold px-5 bg-secondary focus:bg-card transition-all"
-                              />
-                           </div>
-                           <div className="space-y-1.5">
-                              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Max Results</label>
-                              <Input 
-                                type="number"
-                                placeholder="10" 
-                                value={searchMaxResults}
-                                onChange={(e) => setSearchMaxResults(Number(e.target.value))}
-                                className="h-11 border-border rounded-md font-bold px-5 bg-secondary focus:bg-card transition-all"
-                              />
-                           </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Suggested</label>
-                        <div className="flex flex-wrap gap-2">
-                          {SUGGESTED_NICHES.map(niche => (
-                            <button 
-                              key={niche}
-                              onClick={() => setSearchKeyword(niche)}
-                              className={`text-[9px] px-3 py-1.5 rounded-sm border transition-all font-bold uppercase tracking-wider ${
-                                searchKeyword === niche 
-                                  ? 'bg-primary text-primary-foreground border-primary shadow-sm' 
-                                  : 'bg-card text-muted-foreground border-border hover:border-muted-foreground'
-                              }`}
-                            >
-                              {niche}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <Button 
-                        onClick={handleSearch} 
-                        disabled={searching}
-                        className="w-full h-11 font-bold text-[10px] uppercase tracking-wider transition-all shadow-md active:scale-95 flex items-center justify-center gap-3"
-                      >
-                        {searching ? "Extracting Data..." : "Run Extraction"}
-                        {!searching && <ChevronRight className="w-4 h-4" />}
-                      </Button>
+                    <div className="flex-1 relative">
+                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                       <Input 
+                         placeholder="Niche (e.g. Roofers)..." 
+                         value={searchKeyword}
+                         onChange={(e) => setSearchKeyword(e.target.value)}
+                         className="pl-9 h-10 border-none bg-secondary/50 font-bold focus-visible:ring-0"
+                       />
                     </div>
-                  </div>
-
-                  <Card className="bg-foreground rounded-md p-5 text-background border-none shadow-xl overflow-hidden relative group">
-                     <Settings className="absolute -right-6 -bottom-6 w-20 h-20 text-background/5 rotate-12" />
-                     <h3 className="text-base font-bold mb-4 tracking-tight">Protocol</h3>
-                     <ul className="space-y-3">
-                        {[
-                          'Exhaustive location crawl',
-                          'AI digital asset audit',
-                          'Direct delivery to pipeline'
-                        ].map((item, i) => (
-                          <li key={i} className="flex items-start gap-2.5 text-[10px] font-medium text-background/60">
-                             <CheckCircle className="w-3.5 h-3.5 text-lime-400 shrink-0" />
-                             {item}
-                          </li>
-                        ))}
-                     </ul>
-                  </Card>
-                </div>
+                    <div className="w-24 relative">
+                       <Activity className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                       <Input 
+                         type="number"
+                         placeholder="KM" 
+                         value={searchRadius}
+                         onChange={(e) => setSearchRadius(Number(e.target.value))}
+                         className="pl-9 h-10 border-none bg-secondary/50 font-bold focus-visible:ring-0"
+                       />
+                    </div>
+                    <div className="w-24 relative">
+                       <ListFilter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                       <Input 
+                         type="number"
+                         placeholder="Qty" 
+                         value={searchMaxResults}
+                         onChange={(e) => setSearchMaxResults(Number(e.target.value))}
+                         className="pl-9 h-10 border-none bg-secondary/50 font-bold focus-visible:ring-0"
+                       />
+                    </div>
+                    <div className="flex gap-2">
+                       <Button 
+                         variant="secondary" 
+                         onClick={handleRandomSearch}
+                         className="h-10 px-3 bg-secondary/50 hover:bg-secondary border-none"
+                         title="Random Discovery"
+                       >
+                         <Zap className="w-4 h-4" />
+                       </Button>
+                       <Button 
+                         onClick={handleSearch} 
+                         disabled={searching}
+                         className="h-10 px-6 font-black text-[10px] uppercase tracking-widest shadow-lg"
+                       >
+                         {searching ? "..." : "Launch"}
+                       </Button>
+                    </div>
+                 </div>
               </div>
+
+              {/* Suggestions Overlay */}
+              <div className="absolute top-32 left-1/2 -translate-x-1/2 z-30 flex flex-wrap gap-1.5 w-full max-w-4xl justify-center pointer-events-none">
+                {SUGGESTED_NICHES.slice(0, 5).map(niche => (
+                  <button 
+                    key={niche}
+                    onClick={() => setSearchKeyword(niche)}
+                    className={`pointer-events-auto text-[8px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all ${
+                      searchKeyword === niche 
+                        ? 'bg-primary text-primary-foreground border-primary' 
+                        : 'bg-card/50 backdrop-blur-md text-foreground border-border/50'
+                    }`}
+                  >
+                    {niche}
+                  </button>
+                ))}
+              </div>
+
+              {/* Full Screen Map */}
+              <div className="flex-1 w-full h-full">
+                <BusinessSelectorMap 
+                  lat={selectedLat} 
+                  lng={selectedLng} 
+                  radius={searchRadius}
+                  opportunities={[
+                    ...searchResults.map(r => ({
+                      id: `search-${r.name}-${r.lat}`,
+                      name: r.name,
+                      lat: r.lat,
+                      lng: r.lng,
+                      leadScore: r.leadScore,
+                      seoScore: r.technicalAudit.seoScore,
+                      isCrm: false
+                    })),
+                    ...listings.filter(l => l.lat && l.lng).map(l => ({
+                      id: `crm-${l.id}`,
+                      name: l.name,
+                      lat: l.lat,
+                      lng: l.lng,
+                      leadScore: l.leadScore,
+                      seoScore: l.technicalAudit.seoScore,
+                      isCrm: true
+                    }))
+                  ]}
+                  onSelect={(lat, lng) => {
+                    setSelectedLat(lat);
+                    setSelectedLng(lng);
+                    if(!searchLocation) setSearchLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                  }} 
+                />
+              </div>
+
+              {/* Sticky Analysis Widget (Bottom Right) */}
+              <AnimatePresence>
+                {searchResults.length > 0 && (
+                  <motion.div 
+                    initial={{ x: 300, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: 300, opacity: 0 }}
+                    className="absolute bottom-10 right-10 z-40 w-80 max-w-full"
+                  >
+                    <Card className="bg-card/90 backdrop-blur-xl border-border shadow-2xl overflow-hidden rounded-md">
+                       <CardHeader className="bg-primary/5 p-4 border-b border-border">
+                          <div className="flex items-center justify-between">
+                             <CardTitle className="text-xs font-black uppercase tracking-widest">Extraction Snapshot</CardTitle>
+                             <Badge className="bg-primary hover:bg-primary text-[8px] font-black px-1.5 py-0">{searchResults.length}</Badge>
+                          </div>
+                       </CardHeader>
+                       <CardContent className="p-4 space-y-4">
+                          <div className="space-y-3 max-h-60 overflow-y-auto no-scrollbar">
+                             {searchResults.slice(0, 4).map((res, i) => (
+                               <div key={i} className="flex items-center justify-between group cursor-pointer" onClick={() => openLeadDetail(res)}>
+                                  <div className="flex-1 min-w-0">
+                                     <p className="text-[10px] font-bold text-foreground truncate group-hover:text-primary transition-colors">{res.name}</p>
+                                     <p className="text-[8px] text-muted-foreground uppercase font-medium">{res.category}</p>
+                                  </div>
+                                  <div className={`text-[10px] font-black ${res.leadScore > 70 ? 'text-primary' : 'text-muted-foreground'}`}>
+                                     {res.leadScore}%
+                                  </div>
+                                </div>
+                             ))}
+                          </div>
+                          <Button 
+                            className="w-full h-10 font-black text-[9px] uppercase tracking-[0.2em] shadow-lg shadow-primary/20"
+                            onClick={() => setActiveTab('search-results')}
+                          >
+                            Full Report <ArrowUpRight className="ml-2 w-3.5 h-3.5" />
+                          </Button>
+                       </CardContent>
+                    </Card>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           )}
 
@@ -1386,16 +1318,14 @@ export default function App() {
                    <Button variant="outline" size="sm" onClick={() => setActiveTab('search')} className="flex-1 sm:flex-none border-border font-bold text-[8px] sm:text-[9px] uppercase tracking-wider h-8 sm:h-10 px-3 sm:px-4 bg-card shadow-sm hover:bg-secondary">
                      Reset
                    </Button>
-                   <Button 
-                     size="sm"
-                     className="flex-1 sm:flex-none font-bold text-[8px] sm:text-[9px] uppercase tracking-wider h-8 sm:h-10 px-4 sm:px-6 shadow-md active:scale-95 transition-all w-full sm:w-auto mt-2 sm:mt-0"
-                     onClick={() => {
-                       searchResults.forEach(saveListing);
-                       toast.success("Strategic data merged!");
-                     }}
-                   >
-                     Save to CRM
-                   </Button>
+                    <Button 
+                    size="sm"
+                    disabled={isSyncing}
+                    className="flex-1 sm:flex-none font-bold text-[8px] sm:text-[9px] uppercase tracking-wider h-8 sm:h-10 px-4 sm:px-6 shadow-md active:scale-95 transition-all w-full sm:w-auto mt-2 sm:mt-0"
+                    onClick={() => syncAllToCRM(searchResults)}
+                  >
+                    {isSyncing ? "Syncing..." : "Save to CRM"}
+                  </Button>
                  </div>
                </header>
 
@@ -1427,6 +1357,7 @@ export default function App() {
                                 <div className="flex flex-col">
                                   <div className="flex items-center gap-2">
                                      <span className="font-bold text-foreground text-[13px] tracking-tight">{biz.name}</span>
+                                     {alreadySaved && <Badge className="bg-primary hover:bg-primary shadow-lg shadow-primary/20 text-[7px] h-3.5 px-1 font-black uppercase tracking-widest whitespace-nowrap">In CRM</Badge>}
                                      {biz.website && (
                                        <a 
                                           href={biz.website} 
@@ -1648,11 +1579,11 @@ export default function App() {
                   <Table className="min-w-[800px] lg:min-w-full">
                     <TableHeader>
                       <TableRow className="bg-secondary/30 hover:bg-secondary/30 border-b border-border">
-                        <TableHead className="text-[9px] sm:text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Target Intel</TableHead>
-                        <TableHead className="text-[9px] sm:text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Extraction Date</TableHead>
-                        <TableHead className="text-[9px] sm:text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Engagement Status</TableHead>
-                        <TableHead className="text-[9px] sm:text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Efficiency</TableHead>
-                        <TableHead className="text-[9px] sm:text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14 text-right pr-4 sm:pr-8">Strategic Actions</TableHead>
+                        <TableHead className="text-[9px] sm:text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Target Intel</TableHead>
+                        <TableHead className="text-[9px] sm:text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Extraction Date</TableHead>
+                        <TableHead className="text-[9px] sm:text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Engagement Status</TableHead>
+                        <TableHead className="text-[9px] sm:text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14">Efficiency</TableHead>
+                        <TableHead className="text-[9px] sm:text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] px-4 sm:px-8 h-12 sm:h-14 text-right pr-4 sm:pr-8">Strategic Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1822,14 +1753,16 @@ export default function App() {
                         <TableRow className="bg-secondary/30 hover:bg-secondary/30 border-b border-border">
                           <TableHead className="text-muted-foreground font-bold text-[9px] uppercase tracking-widest pl-6 h-11">Temporal Marker</TableHead>
                           <TableHead className="text-muted-foreground font-bold text-[9px] uppercase tracking-widest h-11">Target Vector</TableHead>
+                          <TableHead className="text-muted-foreground font-bold text-[9px] uppercase tracking-widest h-11">City</TableHead>
                           <TableHead className="text-muted-foreground font-bold text-[9px] uppercase tracking-widest h-11 text-center">Dataset Density</TableHead>
+                          <TableHead className="text-muted-foreground font-bold text-[9px] uppercase tracking-widest h-11 text-center">Radius (KM)</TableHead>
                           <TableHead className="text-muted-foreground font-bold text-[9px] uppercase tracking-widest text-right pr-6 h-11">Resolution</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {scans.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={4} className="h-64 text-center">
+                            <TableCell colSpan={5} className="h-64 text-center">
                                <div className="space-y-4">
                                   <History className="w-10 h-10 text-muted-foreground/20 mx-auto" />
                                   <p className="text-muted-foreground font-bold uppercase tracking-widest text-[10px]">No historical data found</p>
@@ -1846,30 +1779,36 @@ export default function App() {
                               <TableCell className="pl-6 py-4">
                                 <div className="flex flex-col">
                                    <span className="text-[11px] font-bold text-foreground">
-                                     {new Date(scan.timestamp?.seconds * 1000).toLocaleDateString()}
+                                     {scan.timestamp ? new Date(scan.timestamp.seconds * 1000).toLocaleDateString() : 'Pending'}
                                    </span>
                                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-tighter">
-                                     {new Date(scan.timestamp?.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                     {scan.timestamp ? new Date(scan.timestamp.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                    </span>
                                 </div>
                               </TableCell>
                               <TableCell className="py-4">
                                 <div className="flex items-center gap-3">
-                                   <div className="w-8 h-8 rounded bg-foreground flex items-center justify-center text-[10px] font-black text-background">
-                                     {scan.keyword.charAt(0).toUpperCase()}
+                                   <div className="w-8 h-8 rounded bg-foreground flex items-center justify-center text-[10px] font-black text-background uppercase">
+                                     {scan.keyword?.charAt(0) || 'S'}
                                    </div>
                                    <div>
-                                      <p className="text-[13px] font-bold text-foreground leading-tight">{scan.keyword}</p>
+                                      <p className="text-[13px] font-bold text-foreground leading-tight uppercase tracking-tight">{scan.keyword || 'Unknown'}</p>
                                       <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1">
                                         <MapPin className="w-3 h-3 opacity-50" /> {scan.location}
                                       </p>
                                    </div>
                                 </div>
                               </TableCell>
+                              <TableCell className="py-4">
+                                 <span className="text-[10px] font-bold text-foreground uppercase tracking-tight">{scan.city || scan.location?.split(',')[0]}</span>
+                              </TableCell>
                               <TableCell className="text-center py-4">
                                  <Badge variant="secondary" className="border-none font-bold text-[9px] rounded px-2 py-0.5">
                                    {scan.count} Objects
                                  </Badge>
+                              </TableCell>
+                              <TableCell className="text-center py-4">
+                                 <span className="text-[10px] font-bold text-muted-foreground">{scan.radius || 5} KM</span>
                               </TableCell>
                               <TableCell className="text-right pr-6 py-4">
                                  <Button size="sm" variant="ghost" className="opacity-0 group-hover:opacity-100 h-8 px-4 font-bold text-[9px] uppercase tracking-widest transition-all text-muted-foreground hover:text-foreground">
@@ -1905,19 +1844,35 @@ export default function App() {
                             </p>
                          </div>
                          <div className="flex flex-col items-end gap-3">
-                             <Badge className="bg-emerald-500/10 text-emerald-500 border-none font-bold uppercase text-[8px] px-3 rounded-sm">Completed</Badge>
-                             <Button 
-                               size="sm" 
-                               variant="outline" 
-                               className="h-8 px-4 font-bold text-[9px] uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-secondary"
-                               onClick={() => {
-                                 const scan = scans.find(s => s.id === selectedScanId);
-                                 if (scan && scan.results) downloadCSV(scan.results, `scan_history_${scan.id}`);
-                               }}
-                             >
-                               Download Sheet
-                             </Button>
-                         </div>
+                              <Badge className="bg-emerald-500/10 text-emerald-500 border-none font-bold uppercase text-[8px] px-3 rounded-sm">Completed</Badge>
+                              <div className="flex gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="h-8 px-4 font-bold text-[9px] uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-secondary"
+                                  onClick={async () => {
+                                    const scan = scans.find(s => s.id === selectedScanId);
+                                    if (scan && scan.results) {
+                                      await syncAllToCRM(scan.results);
+                                    }
+                                  }}
+                                >
+                                  Sync All 
+                                </Button>
+
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="h-8 px-4 font-bold text-[9px] uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-secondary"
+                                  onClick={() => {
+                                    const scan = scans.find(s => s.id === selectedScanId);
+                                    if (scan && scan.results) downloadCSV(scan.results, `scan_history_${scan.id}`);
+                                  }}
+                                >
+                                  Download
+                                </Button>
+                              </div>
+                          </div>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 py-6 lg:py-8">
@@ -1999,20 +1954,72 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               className="space-y-10 lg:space-y-16"
             >
-              <header className="pb-4 border-b border-border flex items-end justify-between gap-4">
-                <div>
-                   <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em] mb-2 leading-none">Strategic Retention</p>
-                   <h1 className="text-3xl lg:text-4xl font-black tracking-tighter text-foreground uppercase">Portfolio Vault</h1>
-                   <p className="text-muted-foreground font-medium text-sm mt-1">Lifecycle management for active client engagements</p>
+              <header className="pb-8 border-b border-border space-y-8">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-6">
+                      <div>
+                        <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em] mb-2 leading-none">Portfolio Intelligence</p>
+                        <h1 className="text-3xl lg:text-4xl font-black tracking-tighter text-foreground uppercase">Portfolio Vault</h1>
+                        <p className="text-muted-foreground font-medium text-sm mt-1">Lifecycle management for active client engagements</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="font-bold text-[9px] uppercase tracking-widest border-border"
+                          onClick={() => {
+                            const biz = listings.find(l => l.id === selectedLeadForOutreach?.id);
+                            if (biz) {
+                              const url = new URL(window.location.origin);
+                              url.searchParams.set('share', biz.id);
+                              navigator.clipboard.writeText(url.toString());
+                              toast.success("Shared dashboard link copied!");
+                            } else {
+                              toast.error("Go to detailed lead view first or select a lead.");
+                            }
+                          }}
+                        >
+                          <Globe className="w-3.5 h-3.5 mr-2" /> Share View
+                        </Button>
+                      </div>
+                      <div className="flex gap-4 w-full sm:w-auto">
+                    <div className="flex-1 sm:flex-initial px-6 py-3 bg-secondary/30 border border-dashed border-border rounded-md flex flex-col items-center">
+                       <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-1.5 flex items-center gap-1.5"><Activity className="w-2.5 h-2.5" /> Stability</span>
+                       <span className="text-xl font-black text-foreground">{(portfolio.length > 0 ? (portfolio.filter(c => !isServiceNear(c.nextServiceDate)).length / portfolio.length * 100).toFixed(0) : 100)}%</span>
+                    </div>
+                    <div className="flex-1 sm:flex-initial px-6 py-3 bg-primary/5 border border-primary/20 rounded-md flex flex-col items-center">
+                       <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none mb-1.5 flex items-center gap-1.5"><Zap className="w-2.5 h-2.5" /> Retention</span>
+                       <span className="text-xl font-black text-primary">{portfolio.length}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex gap-3">
-                   <div className="px-4 py-2 bg-secondary/50 border border-border rounded flex flex-col items-center">
-                      <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-1">Total Assets</span>
-                      <span className="text-sm font-black text-foreground">{portfolio.length}</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                   <div className="p-4 bg-card border border-border rounded flex flex-col gap-2 group hover:shadow-lg transition-all">
+                      <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Active Pipeline Health</span>
+                      <div className="flex items-center gap-4">
+                         <div className="text-2xl font-black text-foreground">Optimal</div>
+                         <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
+                            <motion.div 
+                               initial={{ width: 0 }}
+                               animate={{ width: "92%" }}
+                               className="h-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                            />
+                         </div>
+                      </div>
                    </div>
-                   <div className="px-4 py-2 bg-primary/5 border border-primary/20 rounded flex flex-col items-center">
-                      <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none mb-1">Due Soon</span>
-                      <span className="text-sm font-black text-primary">{portfolio.filter(c => isServiceNear(c.nextServiceDate)).length}</span>
+                   <div className="p-4 bg-card border border-border rounded flex flex-col gap-2">
+                      <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Mean Engagement Variance</span>
+                      <div className="flex items-center gap-3">
+                         <div className="text-2xl font-black text-foreground">Low Risk</div>
+                         <Badge className="bg-emerald-500/10 text-emerald-500 border-none font-bold text-[9px] uppercase tracking-tighter">Verified</Badge>
+                      </div>
+                   </div>
+                   <div className="p-4 bg-primary/5 border border-primary/10 rounded flex flex-col gap-2 relative overflow-hidden group">
+                      <Star className="absolute -right-4 -bottom-4 w-16 h-16 text-primary/5 rotate-12 transition-transform group-hover:scale-125" />
+                      <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none">Estimated Portfolio Yield</span>
+                      <div className="text-2xl font-black text-primary">
+                        {(portfolio.length * 1450).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                      </div>
                    </div>
                 </div>
               </header>
@@ -2375,18 +2382,35 @@ export default function App() {
                       </section>
 
                       <section className="space-y-6">
-                         <div className="flex items-center justify-between">
-                            <h3 className="text-[11px] font-black text-foreground uppercase tracking-[0.25em]">AI Synthesis Engine</h3>
+                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="space-y-4">
+                               <h3 className="text-[11px] font-black text-foreground uppercase tracking-[0.25em]">AI Synthesis Engine</h3>
+                               <div className="flex flex-wrap gap-2">
+                                 {(['professional', 'aggressive', 'helpful', 'curious'] as const).map((tone) => (
+                                   <button
+                                     key={tone}
+                                     onClick={() => setOutreachTone(tone)}
+                                     className={`px-3 py-1 rounded-sm text-[8px] lg:text-[9px] font-black uppercase tracking-widest transition-all border ${
+                                       outreachTone === tone 
+                                         ? 'bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20' 
+                                         : 'bg-secondary/10 text-muted-foreground border-border hover:border-primary/40'
+                                     }`}
+                                   >
+                                     {tone}
+                                   </button>
+                                 ))}
+                               </div>
+                            </div>
                             <Button 
                               size="lg" 
                               onClick={() => generateOutreach(selectedLeadForOutreach)}
                               disabled={generatingOutreach}
-                              className="h-10 lg:h-12 rounded bg-primary text-primary-foreground font-black text-[10px] lg:text-[11px] uppercase tracking-widest px-8 shadow-2xl shadow-primary/30 active:scale-95 transition-all hover:scale-[1.02]"
+                              className="h-10 lg:h-14 rounded bg-primary text-primary-foreground font-black text-[10px] lg:text-[11px] uppercase tracking-[0.2em] px-8 shadow-2xl shadow-primary/30 active:scale-95 transition-all hover:scale-[1.02] sm:min-w-[200px]"
                             >
                                {generatingOutreach ? (
-                                 <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Neural Processing...</>
+                                 <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Processing Neural Drafts...</>
                                ) : (
-                                 <><Zap className="w-4 h-4 mr-2" /> Generate Sequence</>
+                                 <><Zap className="w-4 h-4 mr-2" /> Initiate Synthesis Protocol</>
                                )}
                             </Button>
                          </div>
@@ -2603,51 +2627,6 @@ export default function App() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        
-        {/* Global Intelligence Guide */}
-        <section className="mt-20 border-t border-border pt-12 pb-24 px-6 lg:px-12 bg-secondary/5 relative overflow-hidden">
-           <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
-           <div className="max-w-4xl mx-auto">
-              <div className="flex items-center gap-3 mb-8">
-                 <div className="w-8 h-8 rounded bg-primary/10 border border-primary/20 flex items-center justify-center">
-                    <ShieldCheck className="w-4 h-4 text-primary" />
-                 </div>
-                 <h2 className="text-sm font-black text-foreground uppercase tracking-[0.3em]">Operational Intelligence Protocol</h2>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-                 <div className="space-y-4">
-                    <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                       <Search className="w-3 h-3" /> Acquisition
-                    </h3>
-                    <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                       Deploy sensors via the <b>Satellite Scanner</b> to identify local businesses. Our Gemini-powered engine audits their digital infrastructure in real-time.
-                    </p>
-                 </div>
-                 <div className="space-y-4">
-                    <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                       <Zap className="w-3 h-3" /> Evaluation
-                    </h3>
-                    <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                       Review <b>Propensity Scores</b>. A score above 7 indicates a high probability of technical debt and immediate need for infrastructure upgrades.
-                    </p>
-                 </div>
-                 <div className="space-y-4">
-                    <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                       <MessageSquare className="w-3 h-3" /> Execution
-                    </h3>
-                    <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                       Save leads to your <b>CRM</b> to unlock personalized outreach sequences. Use the <b>Lead detail</b> view to generate AI-tailored communication.
-                    </p>
-                 </div>
-              </div>
-
-              <div className="mt-12 p-4 rounded bg-primary/5 border border-primary/10 flex flex-col md:flex-row items-center justify-between gap-4">
-                 <p className="text-[10px] text-primary font-bold uppercase tracking-widest italic">Always verify digital signatures before initiating outreach protocols.</p>
-                 <Badge variant="outline" className="bg-primary text-primary-foreground border-none px-3 py-1 text-[9px] font-black uppercase tracking-widest">v1.2 Active</Badge>
-              </div>
-           </div>
-           </section>
       </main>
     </div>
   );
