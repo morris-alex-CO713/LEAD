@@ -140,4 +140,20 @@
   .custom-scrollbar-themed::-webkit-scrollbar-thumb {
     @apply bg-primary/20 rounded-full hover:bg-primary/40;
   }
+
+  .dossier-insight::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 2px;
+    height: 100%;
+    @apply bg-primary;
+  }
+
+  .dossier-text-block {
+    background-image: radial-gradient(circle at 2px 2px, var(--border) 1px, transparent 0);
+    background-size: 24px 24px;
+    background-attachment: local;
+  }
 }

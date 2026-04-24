@@ -324,7 +324,9 @@ export default function App() {
     nextServiceMonths: 6,
   });
   const [extractionStep, setExtractionStep] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchResultsPage, setSearchResultsPage] = useState(1);
+  const [crmPage, setCrmPage] = useState(1);
+  const [portfolioPage, setPortfolioPage] = useState(1);
   const itemsPerPage = 10;
   
   const EXTRACTION_STEPS = [
@@ -392,7 +394,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user || !auth.currentUser) {
+    if (!user) {
       setListings([]);
       setScans([]);
       setPortfolio([]);
@@ -600,11 +602,26 @@ export default function App() {
     try {
       const unsaved = results.filter(r => !listings.some(l => l.name === r.name && l.address === r.address));
       if (unsaved.length === 0) {
-        toast.info("All selected leads are already in CRM.");
+        toast.info("All leads are already in your database.");
         return;
       }
-      await Promise.all(unsaved.map(r => saveListing(r, true)));
-      toast.success(`${unsaved.length} new leads synchronized with CRM.`);
+      
+      // Sequential saving to CRM to avoid potential concurrency issues with the same UI state
+      let successCount = 0;
+      for (const res of unsaved) {
+        try {
+          await FirebaseService.saveListing(res);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to save ${res.name}`, e);
+        }
+      }
+      
+      if (successCount > 0) {
+        toast.success(`${successCount} lead${successCount > 1 ? 's' : ''} synchronized with CRM.`);
+      } else {
+        toast.error("Failed to synchronize lead data.");
+      }
     } catch (err) {
       toast.error("Partial synchronization failure.");
     } finally {
@@ -658,6 +675,19 @@ export default function App() {
     if (dashboardFilter === 'high-priority') return (l.leadScore || 0) > 80;
     return true;
   });
+
+  const filteredCrmList = listings.filter(l => {
+    const matchesCrmSearch = l.name.toLowerCase().includes(crmSearch.toLowerCase()) || 
+                           l.category.toLowerCase().includes(crmSearch.toLowerCase()) ||
+                           l.address.toLowerCase().includes(crmSearch.toLowerCase());
+    const matchesStatus = crmStatusTab === 'all' ? true : l.connectionDone;
+    const matchesCategory = crmCategoryFilter ? l.category === crmCategoryFilter : true;
+    return matchesCrmSearch && matchesStatus && matchesCategory;
+  });
+
+  const paginatedCrmList = filteredCrmList.slice((crmPage - 1) * itemsPerPage, crmPage * itemsPerPage);
+  const paginatedPortfolioList = portfolio.slice((portfolioPage - 1) * itemsPerPage, portfolioPage * itemsPerPage);
+  const paginatedSearchResults = searchResults.slice((searchResultsPage - 1) * itemsPerPage, searchResultsPage * itemsPerPage);
 
   const exportToCSV = () => {
     if (listings.length === 0) return;
@@ -1018,7 +1048,7 @@ export default function App() {
                          <p className="text-muted-foreground font-black uppercase tracking-widest text-[10px]">No active data streams</p>
                       </div>
                     ) : (
-                      filteredListings.map((l) => (
+                      filteredListings.slice(0, 5).map((l) => (
                         <LeadCard 
                           key={l.id} 
                           listing={l} 
@@ -1320,11 +1350,11 @@ export default function App() {
                    </Button>
                     <Button 
                     size="sm"
-                    disabled={isSyncing}
+                    disabled={isSyncing || searchResults.length === 0 || searchResults.every(r => listings.some(l => l.name === r.name && l.address === r.address))}
                     className="flex-1 sm:flex-none font-bold text-[8px] sm:text-[9px] uppercase tracking-wider h-8 sm:h-10 px-4 sm:px-6 shadow-md active:scale-95 transition-all w-full sm:w-auto mt-2 sm:mt-0"
                     onClick={() => syncAllToCRM(searchResults)}
                   >
-                    {isSyncing ? "Syncing..." : "Save to CRM"}
+                    {isSyncing ? "Syncing..." : (searchResults.every(r => listings.some(l => l.name === r.name && l.address === r.address)) ? "Already In CRM" : "Save to CRM")}
                   </Button>
                  </div>
                </header>
@@ -1341,7 +1371,7 @@ export default function App() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {searchResults.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((biz, idx) => {
+                    {paginatedSearchResults.map((biz, idx) => {
                       const alreadySaved = listings.some(l => l.name === biz.name);
                       return (
                         <TableRow 
@@ -1449,14 +1479,14 @@ export default function App() {
               {searchResults.length > itemsPerPage && (
                 <div className="flex items-center justify-between pt-6 border-t border-border">
                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                      Showing Page {currentPage} of {Math.ceil(searchResults.length / itemsPerPage)}
+                      Showing Page {searchResultsPage} of {Math.ceil(searchResults.length / itemsPerPage)}
                    </p>
                    <div className="flex gap-1.5">
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={searchResultsPage === 1}
+                        onClick={() => setSearchResultsPage(prev => Math.max(1, prev - 1))}
                         className="h-9 px-4 rounded-md font-bold border-border text-muted-foreground hover:bg-secondary transition-all"
                       >
                         Prev
@@ -1465,9 +1495,9 @@ export default function App() {
                          {Array.from({ length: Math.ceil(searchResults.length / itemsPerPage) }).map((_, i) => (
                            <button
                              key={i}
-                             onClick={() => setCurrentPage(i + 1)}
+                             onClick={() => setSearchResultsPage(i + 1)}
                              className={`w-9 h-9 rounded-md font-bold text-xs transition-all ${
-                               currentPage === i + 1 
+                               searchResultsPage === i + 1 
                                  ? 'bg-primary text-primary-foreground shadow-md' 
                                  : 'bg-card text-muted-foreground border border-border hover:border-muted-foreground hover:text-foreground'
                              }`}
@@ -1479,8 +1509,8 @@ export default function App() {
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        disabled={currentPage === Math.ceil(searchResults.length / itemsPerPage)}
-                        onClick={() => setCurrentPage(prev => Math.min(Math.ceil(searchResults.length / itemsPerPage), prev + 1))}
+                        disabled={searchResultsPage === Math.ceil(searchResults.length / itemsPerPage)}
+                        onClick={() => setSearchResultsPage(prev => Math.min(Math.ceil(searchResults.length / itemsPerPage), prev + 1))}
                         className="h-9 px-4 rounded-md font-bold border-border text-muted-foreground hover:bg-secondary transition-all"
                       >
                         Next
@@ -1587,16 +1617,7 @@ export default function App() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {listings
-                        .filter(l => {
-                          const matchesCrmSearch = l.name.toLowerCase().includes(crmSearch.toLowerCase()) || 
-                                                 l.category.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                                                 l.address.toLowerCase().includes(crmSearch.toLowerCase());
-                          const matchesStatus = crmStatusTab === 'all' ? true : l.connectionDone;
-                          const matchesCategory = crmCategoryFilter ? l.category === crmCategoryFilter : true;
-                          return matchesCrmSearch && matchesStatus && matchesCategory;
-                        })
-                        .length === 0 ? (
+                      {paginatedCrmList.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={5} className="h-64 text-center">
                              <div className="space-y-4">
@@ -1608,16 +1629,7 @@ export default function App() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        listings
-                          .filter(l => {
-                            const matchesCrmSearch = l.name.toLowerCase().includes(crmSearch.toLowerCase()) || 
-                                                   l.category.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                                                   l.address.toLowerCase().includes(crmSearch.toLowerCase());
-                            const matchesStatus = crmStatusTab === 'all' ? true : l.connectionDone;
-                            const matchesCategory = crmCategoryFilter ? l.category === crmCategoryFilter : true;
-                            return matchesCrmSearch && matchesStatus && matchesCategory;
-                          })
-                          .map((lead) => (
+                        paginatedCrmList.map((lead) => (
                           <TableRow 
                             key={lead.id} 
                             className="group hover:bg-secondary/40 transition-all border-b border-border cursor-pointer"
@@ -1726,6 +1738,35 @@ export default function App() {
                   </Table>
                 </div>
               </div>
+
+              {/* CRM Pagination Controls */}
+              {filteredCrmList.length > itemsPerPage && (
+                <div className="flex items-center justify-between pt-8 border-t border-border mt-10">
+                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                      Node {crmPage} / {Math.ceil(filteredCrmList.length / itemsPerPage)}
+                   </p>
+                   <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={crmPage === 1}
+                        onClick={() => setCrmPage(prev => Math.max(1, prev - 1))}
+                        className="h-10 px-6 rounded-md font-bold border-border bg-card text-muted-foreground hover:bg-secondary transition-all"
+                      >
+                        Previous
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={crmPage === Math.ceil(filteredCrmList.length / itemsPerPage)}
+                        onClick={() => setCrmPage(prev => Math.min(Math.ceil(filteredCrmList.length / itemsPerPage), prev + 1))}
+                        className="h-10 px-6 rounded-md font-bold border-border bg-card text-muted-foreground hover:bg-secondary transition-all"
+                      >
+                        Next Sequence
+                      </Button>
+                   </div>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -2036,8 +2077,10 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  portfolio.map((client) => (
-                    <Card key={client.id} className={`border-border shadow-sm overflow-hidden bg-card rounded-md ${isServiceNear(client.nextServiceDate) ? 'ring-2 ring-orange-500/50' : ''}`}>
+                  <>
+                    <div className="grid grid-cols-1 gap-6">
+                      {paginatedPortfolioList.map((client) => (
+                        <Card key={client.id} className={`border-border shadow-sm overflow-hidden bg-card rounded-md ${isServiceNear(client.nextServiceDate) ? 'ring-2 ring-orange-500/50' : ''}`}>
                       <div className="grid grid-cols-1 lg:grid-cols-4">
                         <div className="lg:col-span-1 p-6 border-b lg:border-b-0 lg:border-r border-border flex flex-col justify-between space-y-6">
                            <div className="space-y-3">
@@ -2123,7 +2166,38 @@ export default function App() {
                         </div>
                       </div>
                     </Card>
-                  ))
+                  ))}
+                </div>
+
+                    {/* Portfolio Pagination Controls */}
+                    {portfolio.length > itemsPerPage && (
+                      <div className="flex items-center justify-between pt-8 border-t border-border mt-10">
+                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                            Vault Sector {portfolioPage} / {Math.ceil(portfolio.length / itemsPerPage)}
+                         </p>
+                         <div className="flex gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              disabled={portfolioPage === 1}
+                              onClick={() => setPortfolioPage(prev => Math.max(1, prev - 1))}
+                              className="h-10 px-6 rounded-md font-bold border-border bg-card text-muted-foreground hover:bg-secondary transition-all"
+                            >
+                              Previous Sector
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              disabled={portfolioPage === Math.ceil(portfolio.length / itemsPerPage)}
+                              onClick={() => setPortfolioPage(prev => Math.min(Math.ceil(portfolio.length / itemsPerPage), prev + 1))}
+                              className="h-10 px-6 rounded-md font-bold border-border bg-card text-muted-foreground hover:bg-secondary transition-all"
+                            >
+                              Next Sector
+                            </Button>
+                         </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </motion.div>
@@ -2184,216 +2258,257 @@ export default function App() {
           {activeTab === 'lead-detail' && selectedLeadForOutreach && (
             <motion.div 
               key="lead-detail"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="flex flex-col bg-background min-h-screen"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="flex flex-col bg-background min-h-screen font-sans"
             >
               <div className="flex flex-col">
-                <div className="relative h-64 lg:h-72 bg-primary/5 border-b border-border p-8 lg:p-12 flex items-end">
-                  <div className="absolute top-6 left-6 z-30">
+                {/* Dossier Header */}
+                <div className="relative h-64 lg:h-72 bg-secondary/10 border-b border-border/50 p-8 lg:p-12 flex items-end">
+                  <div className="absolute top-8 left-8 z-30">
                     <Button 
-                      variant="outline" 
+                      variant="ghost" 
                       size="sm" 
                       onClick={closeLeadDetail}
-                      className="h-9 px-4 rounded border-border bg-card/80 backdrop-blur-md font-bold text-[10px] uppercase tracking-widest transition-all hover:bg-secondary hover:text-foreground shadow-2xl"
+                      className="h-10 px-5 rounded-full border border-border bg-card/40 backdrop-blur-xl font-bold text-[10px] uppercase tracking-[0.2em] transition-all hover:bg-secondary hover:text-foreground shadow-sm"
                     >
-                      <ChevronRight className="w-4 h-4 mr-2 rotate-180" /> Return to Command
+                      <ChevronRight className="w-4 h-4 mr-2 rotate-180" /> Operational Overview
                     </Button>
                   </div>
 
-                   <div className="absolute inset-0 overflow-hidden">
-                      <div className="absolute inset-0 bg-[radial-gradient(var(--primary)_0.5px,transparent_0.5px)] [background-size:16px_16px] opacity-10" />
-                      <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-card to-transparent" />
+                   <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                      <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]" />
+                      <div className="absolute bottom-0 left-0 w-full h-40 bg-gradient-to-t from-background via-background/80 to-transparent" />
                    </div>
-                   <div className="relative z-10 flex items-center gap-6 w-full">
-                      <div className="w-20 h-20 lg:w-28 lg:h-28 bg-foreground text-background rounded-md flex items-center justify-center text-3xl lg:text-5xl font-black shadow-2xl">
+
+                   <div className="relative z-10 flex flex-col md:flex-row items-start md:items-end gap-8 w-full">
+                      <div className="w-24 h-24 lg:w-32 lg:h-32 bg-primary text-primary-foreground rounded-2xl flex items-center justify-center text-4xl lg:text-5xl font-black shadow-[0_20px_50px_rgba(var(--primary-rgb),0.3)] border border-white/10 shrink-0">
                         {selectedLeadForOutreach.name.charAt(0)}
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2 lg:mb-3">
-                           <h2 className="text-3xl lg:text-5xl font-black tracking-tighter text-foreground leading-none">{selectedLeadForOutreach.name}</h2>
-                           <Badge variant="outline" className="bg-primary/10 text-primary border-none font-bold uppercase text-[9px] lg:text-[10px] px-2 py-0.5 lg:px-3 lg:py-1">{selectedLeadForOutreach.status}</Badge>
+                      <div className="flex-1 pb-2">
+                        <div className="flex items-center gap-4 mb-2">
+                           <h2 className="text-3xl lg:text-5xl font-black tracking-tight text-foreground leading-none">{selectedLeadForOutreach.name}</h2>
+                           <Badge className="bg-primary/10 text-primary border-primary/20 font-black uppercase text-[10px] px-3 py-1 tracking-widest">{selectedLeadForOutreach.status}</Badge>
                         </div>
-                        <p className="text-muted-foreground font-medium text-sm lg:text-base flex items-center gap-2">
+                        <p className="text-muted-foreground font-medium text-sm lg:text-lg flex items-center gap-2 opacity-80">
                            <MapPin className="w-4 h-4 lg:w-5 lg:h-5 text-primary" /> {selectedLeadForOutreach.address}
                         </p>
                       </div>
-                      <div className="text-right hidden sm:block">
-                         <div className="text-4xl lg:text-6xl font-black text-primary tracking-tighter leading-none">{selectedLeadForOutreach.leadScore}</div>
-                         <div className="text-[10px] lg:text-[11px] font-black text-muted-foreground uppercase tracking-[0.25em] mt-2">Acquisition Velocity</div>
+                      <div className="text-right hidden lg:block pb-2">
+                         <div className="text-5xl lg:text-7xl font-black text-primary tracking-tighter leading-none">{selectedLeadForOutreach.leadScore}%</div>
+                         <div className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em] mt-3">Acquisition Priority</div>
                       </div>
                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
-                   <div className="lg:col-span-2 p-8 lg:p-12 lg:space-y-16 space-y-10 border-r border-border">
-                      <section className="space-y-6">
-                         <div className="flex items-center justify-between">
-                            <h3 className="text-[10px] lg:text-[11px] font-black text-foreground uppercase tracking-[0.25em]">Deployment Intelligence</h3>
-                            <div className="flex items-center gap-2 text-muted-foreground font-bold text-[10px] lg:text-[11px] uppercase tracking-widest">
-                               <Globe className="w-4 h-4" /> Site Integrity
+                <div className="grid grid-cols-1 lg:grid-cols-4 min-h-[calc(100vh-18rem)]">
+                   {/* Main Intelligence Grid */}
+                   <div className="lg:col-span-3 p-8 lg:p-14 space-y-16 border-r border-border/40">
+                      
+                      {/* Technical Audit Section */}
+                      <section className="space-y-8">
+                         <div className="flex items-center justify-between border-b border-border/40 pb-4">
+                            <div className="flex items-center gap-3">
+                               <div className="w-2 h-8 bg-primary rounded-full shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)]" />
+                               <h3 className="text-xs font-black text-foreground uppercase tracking-[0.3em]">Intelligence Node: Infrastructure</h3>
+                            </div>
+                            <div className="flex items-center gap-3 text-muted-foreground font-bold text-[10px] uppercase tracking-widest bg-secondary/30 px-3 py-1.5 rounded-full border border-border/50">
+                               <Globe className="w-4 h-4 text-primary" /> Site Analysis Terminal
                             </div>
                          </div>
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="p-6 bg-secondary/30 rounded border border-border/50 group hover:shadow-lg transition-all">
-                               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">SEO Ecosystem</p>
-                               <div className="flex items-center justify-between">
-                                  <div className="text-3xl font-black text-foreground">{selectedLeadForOutreach.technicalAudit.seoScore}/10</div>
-                                  <div className={`w-2.5 h-2.5 rounded-full ${selectedLeadForOutreach.technicalAudit.seoScore > 7 ? 'bg-emerald-500' : 'bg-rose-500'} animate-pulse`} />
+
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="p-8 bg-card rounded-2xl border border-border/80 shadow-sm relative overflow-hidden group">
+                               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 -mr-16 -mt-16 rounded-full group-hover:scale-125 transition-transform duration-700" />
+                               <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] mb-6">SEO Integrity Quotient</p>
+                               <div className="flex items-center justify-between mb-4">
+                                  <div className="text-4xl font-black text-foreground">{selectedLeadForOutreach.technicalAudit.seoScore}<span className="text-xl text-muted-foreground/50 ml-1">/10</span></div>
+                                  <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter ${selectedLeadForOutreach.technicalAudit.seoScore > 7 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                    {selectedLeadForOutreach.technicalAudit.seoScore > 7 ? 'Optimal' : 'Deficient'}
+                                  </div>
                                </div>
-                               <div className="mt-4 w-full h-2 bg-border rounded-full overflow-hidden">
+                               <div className="w-full h-2 bg-secondary/50 rounded-full overflow-hidden">
                                   <motion.div 
                                     initial={{ width: 0 }}
                                     animate={{ width: `${selectedLeadForOutreach.technicalAudit.seoScore * 10}%` }}
-                                    transition={{ duration: 1, delay: 0.5 }}
-                                    className={`h-full ${selectedLeadForOutreach.technicalAudit.seoScore > 7 ? 'bg-emerald-500' : 'bg-rose-500'}`} 
+                                    transition={{ duration: 1.5, ease: "easeOut" }}
+                                    className={`h-full ${selectedLeadForOutreach.technicalAudit.seoScore > 7 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]'}`} 
                                   />
-                               </div>
+                                </div>
                             </div>
-                            <div className="p-6 bg-secondary/30 rounded border border-border/50 hover:shadow-lg transition-all">
-                               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">UX Latency</p>
-                               <div className="text-3xl font-black text-foreground uppercase">{selectedLeadForOutreach.technicalAudit.loadSpeed}</div>
-                               <p className="text-[11px] font-medium text-muted-foreground mt-3 italic">Infrastructure needs immediate optimization</p>
+
+                            <div className="p-8 bg-card rounded-2xl border border-border/80 shadow-sm relative overflow-hidden group">
+                               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 -mr-16 -mt-16 rounded-full group-hover:scale-125 transition-transform duration-700" />
+                               <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] mb-6">Latency Profile</p>
+                               <div className="text-4xl font-black text-foreground uppercase tracking-tight">{selectedLeadForOutreach.technicalAudit.loadSpeed}</div>
+                               <div className="mt-6 flex items-center gap-2">
+                                  <div className={`w-2 h-2 rounded-full animate-pulse ${selectedLeadForOutreach.technicalAudit.loadSpeed === 'fast' ? 'bg-emerald-500' : 'bg-orange-500'}`} />
+                                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">{selectedLeadForOutreach.technicalAudit.loadSpeed === 'fast' ? 'Low Latency Detected' : 'Infrastructure Burden High'}</p>
+                               </div>
                             </div>
                          </div>
                       </section>
 
+                      {/* Competitive Section */}
                       <section className="space-y-8">
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                             <h3 className="text-[10px] lg:text-[11px] font-black text-foreground uppercase tracking-[0.25em]">Tactical Competitor Blueprint</h3>
-                             <div className="flex items-center gap-2 text-muted-foreground font-bold text-[10px] uppercase tracking-widest">
-                                <Trophy className="w-4 h-4" /> Market Dominance
+                          <div className="flex items-center justify-between border-b border-border/40 pb-4">
+                             <div className="flex items-center gap-3">
+                                <div className="w-2 h-8 bg-primary rounded-full shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)] opacity-50" />
+                                <h3 className="text-xs font-black text-foreground uppercase tracking-[0.3em]">Sector Analysis: Rival Assets</h3>
                              </div>
+                             <Trophy className="w-5 h-5 text-muted-foreground/20" />
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
                              {selectedLeadForOutreach.competitorBenchmarks && selectedLeadForOutreach.competitorBenchmarks.length > 0 ? (
                                selectedLeadForOutreach.competitorBenchmarks.map((comp, idx) => (
-                                 <div key={idx} className="p-6 bg-card border border-border rounded shadow-sm hover:shadow-md transition-all group overflow-hidden relative">
-                                    <div className="absolute top-0 right-0 w-16 h-16 bg-primary/5 -mr-8 -mt-8 rounded-full group-hover:scale-150 transition-transform" />
-                                    <h4 className="text-sm font-black text-foreground mb-1">{comp.name}</h4>
-                                    <div className="flex items-center gap-2 mb-4">
-                                       <Badge variant="outline" className="text-[8px] uppercase font-bold text-primary border-primary/20 bg-primary/5">SEO: {comp.seoScore}/10</Badge>
-                                       {comp.website && <span className="text-[9px] font-bold text-muted-foreground truncate max-w-[120px]">{comp.website}</span>}
+                                 <div key={idx} className="p-6 bg-secondary/15 border border-border/40 rounded-2xl group hover:border-primary/30 transition-all duration-300">
+                                    <div className="flex justify-between items-start mb-4">
+                                       <h4 className="text-base font-black text-foreground group-hover:text-primary transition-colors">{comp.name}</h4>
+                                       <Badge variant="outline" className="text-[9px] font-black text-primary border-primary/20 bg-primary/5">SEO: {comp.seoScore}/10</Badge>
                                     </div>
-                                    <div className="p-3 bg-secondary/50 rounded-sm border-l-2 border-primary">
-                                       <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                                          <Zap className="w-3 h-3 text-primary" /> Core Advantage
-                                       </p>
-                                       <p className="text-xs text-foreground italic font-medium leading-relaxed">
+                                    <div className="p-4 bg-background/40 rounded-xl border border-border/30 backdrop-blur-sm">
+                                       <div className="flex items-center gap-2 mb-2">
+                                          <Zap className="w-3 h-3 text-primary" />
+                                          <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">Tactical Edge</span>
+                                       </div>
+                                       <p className="text-xs text-foreground/80 leading-relaxed font-medium italic">
                                           "{comp.advantage}"
                                        </p>
                                     </div>
                                  </div>
                                ))
                              ) : (
-                               <div className="col-span-2 p-8 bg-secondary/20 border border-dashed border-border rounded flex flex-col items-center justify-center text-center space-y-3">
-                                  <AlertTriangle className="w-8 h-8 text-muted-foreground/30" />
-                                  <p className="text-xs text-muted-foreground font-medium italic">No competitive nodes detected in immediate vicinity.</p>
+                               <div className="col-span-full p-12 border border-dashed border-border/60 rounded-2xl flex flex-col items-center justify-center text-center space-y-4 bg-secondary/5">
+                                  <AlertTriangle className="w-8 h-8 text-muted-foreground/20" />
+                                  <p className="text-xs text-muted-foreground font-black uppercase tracking-[0.2em] opacity-40">No localized rival signatures detected</p>
                                </div>
                              )}
                           </div>
                       </section>
 
-                      <section className="space-y-8">
-                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                            <h3 className="text-[10px] lg:text-[11px] font-black text-foreground uppercase tracking-[0.25em]">Strategic Benchmarking</h3>
-                            <div className="flex gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-border/30 pt-4 sm:pt-0">
-                               <div className="flex flex-col items-start sm:items-end">
-                                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-1.5">Market Avg</span>
-                                  <span className="text-xs sm:text-sm font-bold text-foreground">
+                      {/* Benchmarking Section */}
+                      <section className="space-y-10">
+                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                            <div className="flex items-center gap-3">
+                               <div className="w-2 h-8 bg-primary rounded-full shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)]" />
+                               <h3 className="text-xs font-black text-foreground uppercase tracking-[0.3em]">Statistical Benchmarking</h3>
+                            </div>
+                            <div className="flex gap-8 bg-secondary/20 p-4 rounded-xl border border-border/40">
+                               <div className="flex flex-col items-end">
+                                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-[0.2em] leading-none mb-2">Sector Average</span>
+                                  <span className="text-xl font-black text-foreground">
                                     {(listings.filter(l => l.category === selectedLeadForOutreach.category).reduce((acc, curr) => acc + curr.leadScore, 0) / (listings.filter(l => l.category === selectedLeadForOutreach.category).length || 1)).toFixed(1)}%
                                   </span>
                                </div>
-                               <div className="flex flex-col items-start sm:items-end">
-                                  <span className="text-[9px] font-black text-primary uppercase tracking-widest leading-none mb-1.5">Potential</span>
-                                  <span className="text-xs sm:text-sm font-bold text-primary">{selectedLeadForOutreach.leadScore}%</span>
+                               <div className="w-px h-10 bg-border/50" />
+                               <div className="flex flex-col items-end">
+                                  <span className="text-[9px] font-black text-primary uppercase tracking-[0.2em] leading-none mb-2">Asset Potential</span>
+                                  <span className="text-xl font-black text-primary">{selectedLeadForOutreach.leadScore}%</span>
                                </div>
                             </div>
                          </div>
                          
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                             <div className="space-y-4">
-                               <div className="flex justify-between text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                                  <span>SEO vs Category Average</span>
-                                  <span>{selectedLeadForOutreach.technicalAudit.seoScore} / 10</span>
+                               <div className="flex justify-between text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em] mb-2">
+                                  <span>SEO Delta vs Category</span>
+                                  <span className="text-foreground">{selectedLeadForOutreach.technicalAudit.seoScore} / 10</span>
                                 </div>
-                               <div className="h-3 bg-secondary rounded-full overflow-hidden flex gap-1 p-0.5">
-                                  <div className="h-full bg-primary/20 rounded-full" style={{ width: `${(listings.filter(l => l.category === selectedLeadForOutreach.category).reduce((acc, curr) => acc + curr.technicalAudit.seoScore, 0) / (listings.filter(l => l.category === selectedLeadForOutreach.category).length || 1)) * 10}%` }} />
-                                  <div className="h-full bg-primary rounded-full shadow-[0_0_8px_rgba(59,130,246,0.3)]" style={{ width: `${selectedLeadForOutreach.technicalAudit.seoScore * 10}%` }} />
+                               <div className="h-4 bg-secondary/30 rounded-full overflow-hidden flex p-1 border border-border/40">
+                                  <div className="h-full bg-primary/20 rounded-full transition-all duration-1000" style={{ width: `${(listings.filter(l => l.category === selectedLeadForOutreach.category).reduce((acc, curr) => acc + curr.technicalAudit.seoScore, 0) / (listings.filter(l => l.category === selectedLeadForOutreach.category).length || 1)) * 10}%` }} />
+                                  <div className="h-full bg-primary rounded-full shadow-[0_0_10px_rgba(var(--primary-rgb),0.5)] transition-all duration-1000" style={{ width: `${selectedLeadForOutreach.technicalAudit.seoScore * 10}%` }} />
                                </div>
+                               <p className="text-[10px] font-bold text-muted-foreground italic">Colored bar indicates current asset performance vs dimmed sector average.</p>
                             </div>
-                            <div className="flex flex-col justify-center p-6 bg-primary/5 rounded border border-primary/10 relative overflow-hidden group">
-                               <Zap className="absolute -right-4 -bottom-4 w-16 h-16 text-primary/5 group-hover:scale-110 transition-transform" />
-                               <p className="text-[11px] font-bold text-foreground mb-1.5 relative z-10">Opportunity Insight</p>
-                               <p className="text-xs text-muted-foreground leading-relaxed relative z-10">
+                            <div className="p-6 bg-primary/5 rounded-2xl border border-primary/20 relative overflow-hidden dossier-insight">
+                               <Zap className="absolute -right-4 -bottom-4 w-20 h-20 text-primary opacity-5" />
+                               <p className="text-[12px] font-black text-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+                                  <Target className="w-4 h-4 text-primary" /> Analyst Observation
+                               </p>
+                               <p className="text-sm text-muted-foreground leading-relaxed font-medium">
                                  {selectedLeadForOutreach.leadScore > (listings.filter(l => l.category === selectedLeadForOutreach.category).reduce((acc, curr) => acc + curr.leadScore, 0) / (listings.filter(l => l.category === selectedLeadForOutreach.category).length || 1)) 
-                                   ? "This target shows higher-than-average digital deficit, making it a priority acquisition target."
-                                   : "Target is performing within market norms. High-touch personalized strategy recommended."}
+                                   ? "Strategic analysis confirms severe digital infrastructure deficit compared to sector rivals. Acquisition is highly recommended."
+                                   : "Target maintains baseline market norms. Standard personalized engagement sequence recommended."}
                                </p>
                             </div>
                          </div>
                          
                          {/* Live Site Preview */}
-                         <div className="relative rounded border border-border h-80 lg:h-[400px] bg-secondary group shadow-xl overflow-hidden">
-                            {selectedLeadForOutreach.website ? (
-                               <>
-                                 <img 
-                                   src={`https://s0.wp.com/mshots/v1/${encodeURIComponent(selectedLeadForOutreach.website)}?w=1280&h=960`} 
-                                   alt="Site Preview" 
-                                   referrerPolicy="no-referrer"
-                                   className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-                                 />
-                                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-8">
-                                    <div className="space-y-4">
-                                       <h4 className="text-white text-xl font-bold tracking-tight">Active Surveillance Feedback</h4>
-                                       <a 
-                                         href={selectedLeadForOutreach.website} 
-                                         target="_blank" 
-                                         rel="noreferrer" 
-                                         className="inline-flex items-center gap-2 bg-white text-black px-6 py-2.5 rounded font-bold text-[10px] uppercase tracking-widest hover:scale-105 transition-all active:scale-95"
-                                       >
-                                          Visit Terminal <ExternalLink className="w-4 h-4" />
-                                       </a>
+                         <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                               <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em]">Visual Asset Reconnaissance</p>
+                               {selectedLeadForOutreach.website && (
+                                 <span className="text-[10px] font-bold text-primary font-mono">{selectedLeadForOutreach.website}</span>
+                               )}
+                            </div>
+                            <div className="relative rounded-2xl border border-border/80 h-96 lg:h-[480px] bg-secondary/20 group overflow-hidden shadow-2xl">
+                               {selectedLeadForOutreach.website ? (
+                                 <>
+                                   <div className="absolute inset-0 bg-secondary animate-pulse" />
+                                   <img 
+                                     src={`https://s0.wp.com/mshots/v1/${encodeURIComponent(selectedLeadForOutreach.website)}?w=1280&h=960`} 
+                                     alt="Site Preview" 
+                                     referrerPolicy="no-referrer"
+                                     className="relative z-10 w-full h-full object-cover object-top transition-all duration-1000 grayscale-[0.5] group-hover:grayscale-0 group-hover:scale-[1.02]"
+                                   />
+                                   <div className="absolute inset-0 z-20 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex items-end p-10">
+                                      <div className="space-y-4">
+                                         <h4 className="text-white text-2xl font-black tracking-tight">Active Terminal Link</h4>
+                                         <a 
+                                           href={selectedLeadForOutreach.website} 
+                                           target="_blank" 
+                                           rel="noreferrer" 
+                                           className="inline-flex items-center gap-3 bg-white text-black px-8 py-3 rounded-full font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:bg-primary hover:text-white transition-all transform hover:-translate-y-1 active:translate-y-0"
+                                         >
+                                            Infiltrate Frontend <ExternalLink className="w-4 h-4" />
+                                         </a>
+                                      </div>
+                                   </div>
+                                 </>
+                               ) : (
+                                 <div className="w-full h-full flex flex-col items-center justify-center text-center p-16 space-y-6">
+                                    <div className="w-24 h-24 bg-muted/20 rounded-full flex items-center justify-center border border-dashed border-muted-foreground/30">
+                                       <Monitor className="w-12 h-12 text-muted-foreground/20" />
+                                    </div>
+                                    <div className="space-y-3">
+                                       <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.3em]">No Digital Trace Detected</p>
+                                       <p className="text-sm text-muted-foreground/60 max-w-sm mx-auto italic font-medium leading-relaxed">Intelligence scan failed to locate an active web terminal. Manual reconnaissance advised.</p>
                                     </div>
                                  </div>
-                               </>
-                            ) : (
-                               <div className="w-full h-full flex flex-col items-center justify-center text-center p-12 space-y-4">
-                                  <div className="w-20 h-20 bg-muted/20 rounded-full flex items-center justify-center border border-dashed border-muted-foreground/30">
-                                     <Monitor className="w-10 h-10 text-muted-foreground/30" />
-                                  </div>
-                                  <div className="space-y-2">
-                                     <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em]">No Digital Asset Detected</p>
-                                     <p className="text-xs text-muted-foreground/60 max-w-[200px] mx-auto italic font-medium">This target may require an intensive manual infrastructure audit.</p>
-                                  </div>
-                               </div>
-                            )}
+                               )}
+                            </div>
                          </div>
 
-                         <div className="bg-foreground text-background p-8 lg:p-10 rounded-md shadow-2xl relative overflow-hidden group">
-                            <Zap className="absolute -right-6 -top-6 w-32 h-32 text-background/10 rotate-12 group-hover:scale-110 transition-transform duration-700" />
-                            <h4 className="text-[11px] font-black uppercase tracking-[0.3em] mb-6 text-background/50">Acquisition Protocol</h4>
-                            <p className="text-lg lg:text-xl font-bold tracking-tight italic leading-relaxed relative z-10">
+                         {/* Engagement Strategy Block */}
+                         <div className="bg-slate-950 text-white p-10 lg:p-14 rounded-3xl shadow-[0_35px_60px_-15px_rgba(0,0,0,0.5)] relative overflow-hidden group border border-white/5">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+                            <Zap className="absolute -right-12 -top-12 w-48 h-48 text-primary opacity-5 rotate-12 group-hover:scale-110 transition-transform duration-1000" />
+                            <h4 className="text-[10px] font-extrabold uppercase tracking-[0.5em] mb-8 text-primary/70">Strategic Directive</h4>
+                            <p className="text-xl lg:text-3xl font-black leading-[1.4] tracking-tight italic relative z-10 selection:bg-primary selection:text-white">
                                "{selectedLeadForOutreach.outreachStrategy}"
                             </p>
                          </div>
                       </section>
 
-                      <section className="space-y-6">
-                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      {/* Synthesis Engine Section */}
+                      <section className="space-y-10 pt-8 border-t border-border/40">
+                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-8">
                             <div className="space-y-4">
-                               <h3 className="text-[11px] font-black text-foreground uppercase tracking-[0.25em]">AI Synthesis Engine</h3>
+                               <div className="flex items-center gap-3">
+                                  <div className="w-2 h-8 bg-primary rounded-full shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)]" />
+                                  <h3 className="text-xs font-black text-foreground uppercase tracking-[0.3em]">Neural Synthesis Engine</h3>
+                               </div>
                                <div className="flex flex-wrap gap-2">
                                  {(['professional', 'aggressive', 'helpful', 'curious'] as const).map((tone) => (
                                    <button
                                      key={tone}
                                      onClick={() => setOutreachTone(tone)}
-                                     className={`px-3 py-1 rounded-sm text-[8px] lg:text-[9px] font-black uppercase tracking-widest transition-all border ${
+                                     className={`px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${
                                        outreachTone === tone 
-                                         ? 'bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20' 
-                                         : 'bg-secondary/10 text-muted-foreground border-border hover:border-primary/40'
+                                         ? 'bg-primary text-primary-foreground border-primary shadow-[0_0_20px_rgba(var(--primary-rgb),0.4)]' 
+                                         : 'bg-card text-muted-foreground border-border hover:border-primary/40 hover:text-foreground'
                                      }`}
                                    >
                                      {tone}
@@ -2405,12 +2520,12 @@ export default function App() {
                               size="lg" 
                               onClick={() => generateOutreach(selectedLeadForOutreach)}
                               disabled={generatingOutreach}
-                              className="h-10 lg:h-14 rounded bg-primary text-primary-foreground font-black text-[10px] lg:text-[11px] uppercase tracking-[0.2em] px-8 shadow-2xl shadow-primary/30 active:scale-95 transition-all hover:scale-[1.02] sm:min-w-[200px]"
+                              className="h-16 rounded-full bg-primary text-primary-foreground font-black text-[11px] uppercase tracking-[0.3em] px-10 shadow-[0_15px_35px_rgba(var(--primary-rgb),0.4)] hover:scale-[1.03] transition-all transform active:scale-95 group sm:min-w-[280px]"
                             >
                                {generatingOutreach ? (
-                                 <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Processing Neural Drafts...</>
+                                 <><Loader2 className="w-5 h-5 animate-spin mr-3" /> Processing Sequences... </>
                                ) : (
-                                 <><Zap className="w-4 h-4 mr-2" /> Initiate Synthesis Protocol</>
+                                 <><Zap className="w-5 h-5 mr-3 group-hover:animate-pulse" /> Initiate Synthesis Protocol</>
                                )}
                             </Button>
                          </div>
@@ -2418,106 +2533,114 @@ export default function App() {
                          <AnimatePresence mode="wait">
                             {selectedLeadForOutreach.outreachDrafts ? (
                                <motion.div 
-                                 initial={{ opacity: 0, scale: 0.98 }}
-                                 animate={{ opacity: 1, scale: 1 }}
-                                 className="grid grid-cols-1 md:grid-cols-2 gap-8"
+                                 initial={{ opacity: 0, y: 30 }}
+                                 animate={{ opacity: 1, y: 0 }}
+                                 className="grid grid-cols-1 md:grid-cols-2 gap-10"
                                >
                                   <div className="space-y-4">
-                                     <div className="flex items-center justify-between px-1">
-                                        <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Primary Electronic Mail</p>
-                                        <Button 
-                                          variant="outline" 
-                                          size="sm" 
-                                          className="h-8 border-border bg-card font-bold text-[9px] uppercase tracking-widest px-3 hover:bg-secondary"
+                                     <div className="flex items-center justify-between px-2">
+                                        <div className="flex items-center gap-2">
+                                           <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                           <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Transmission Draft A: Direct</p>
+                                        </div>
+                                        <button 
+                                          className="text-[10px] font-black text-primary uppercase tracking-widest hover:text-foreground transition-colors flex items-center gap-2 group"
                                           onClick={() => {
                                             navigator.clipboard.writeText(selectedLeadForOutreach.outreachDrafts?.email || '');
-                                            toast.success("Draft secure - copied to clipboard.");
+                                            toast.success("Draft synchronized to clipboard.");
                                           }}
                                         >
-                                           <ColumnsIcon className="w-3.5 h-3.5 mr-2" /> Copy
-                                        </Button>
+                                           <Copy className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" /> Copy Token
+                                        </button>
                                      </div>
-                                     <div className="p-6 bg-secondary/50 border border-border rounded-md text-sm font-medium leading-relaxed max-h-64 overflow-y-auto custom-scrollbar-themed">
-                                        <div className="whitespace-pre-wrap">{selectedLeadForOutreach.outreachDrafts.email}</div>
+                                     <div className="p-8 bg-card border border-border/80 rounded-2xl text-sm font-medium leading-relaxed max-h-[400px] overflow-y-auto no-scrollbar shadow-inner relative dossier-text-block">
+                                        <div className="whitespace-pre-wrap selection:bg-primary/20">{selectedLeadForOutreach.outreachDrafts.email}</div>
                                      </div>
                                   </div>
                                   <div className="space-y-4">
-                                     <div className="flex items-center justify-between px-1">
-                                        <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">LinkedIn Direct Proxy</p>
-                                        <Button 
-                                          variant="outline" 
-                                          size="sm" 
-                                          className="h-8 border-border bg-card font-bold text-[9px] uppercase tracking-widest px-3 hover:bg-secondary"
+                                     <div className="flex items-center justify-between px-2">
+                                        <div className="flex items-center gap-2">
+                                           <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                           <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Transmission Draft B: Social</p>
+                                        </div>
+                                        <button 
+                                          className="text-[10px] font-black text-primary uppercase tracking-widest hover:text-foreground transition-colors flex items-center gap-2 group"
                                           onClick={() => {
                                             navigator.clipboard.writeText(selectedLeadForOutreach.outreachDrafts?.linkedin || '');
-                                            toast.success("Draft secure - copied to clipboard.");
+                                            toast.success("Draft synchronized to clipboard.");
                                           }}
                                         >
-                                           <ColumnsIcon className="w-3.5 h-3.5 mr-2" /> Copy
-                                        </Button>
+                                           <Copy className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" /> Copy Token
+                                        </button>
                                      </div>
-                                     <div className="p-6 bg-secondary/50 border border-border rounded-md text-sm font-medium leading-relaxed max-h-64 overflow-y-auto custom-scrollbar-themed">
-                                        <div className="whitespace-pre-wrap">{selectedLeadForOutreach.outreachDrafts.linkedin}</div>
+                                     <div className="p-8 bg-card border border-border/80 rounded-2xl text-sm font-medium leading-relaxed max-h-[400px] overflow-y-auto no-scrollbar shadow-inner relative dossier-text-block">
+                                        <div className="whitespace-pre-wrap selection:bg-primary/20">{selectedLeadForOutreach.outreachDrafts.linkedin}</div>
                                      </div>
                                   </div>
                                </motion.div>
                             ) : (
-                               <div className="h-48 lg:h-64 bg-secondary/20 border border-border border-dashed rounded-md flex flex-col items-center justify-center text-center p-12 space-y-4 group">
-                                  <div className="w-16 h-16 bg-muted/20 rounded-full flex items-center justify-center animate-pulse group-hover:scale-110 transition-all">
-                                     <Loader2 className="w-8 h-8 text-muted-foreground/30" />
+                               <div className="h-56 lg:h-72 bg-secondary/5 border-2 border-dashed border-border/60 rounded-3xl flex flex-col items-center justify-center text-center p-12 space-y-6 group">
+                                  <div className="w-20 h-20 bg-primary/5 rounded-full flex items-center justify-center animate-pulse border border-primary/10">
+                                     <Cpu className="w-10 h-10 text-primary/30" />
                                   </div>
                                   <div className="space-y-2">
-                                     <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em]">Sequence Analysis Pending Extraction</p>
-                                     <p className="text-xs text-muted-foreground/50 max-w-[250px] mx-auto italic font-medium leading-relaxed">Intelligence synthesis requires manual triggers below to generate personalized outreach logic.</p>
+                                     <p className="text-[12px] font-black text-muted-foreground uppercase tracking-[0.3em]">Awaiting Sequence Trigger</p>
+                                     <p className="text-xs text-muted-foreground/50 max-w-sm mx-auto italic font-medium leading-relaxed">Synthesis of personalized conversion sequences requires a manual trigger above.</p>
                                   </div>
                                </div>
                             )}
                          </AnimatePresence>
                       </section>
 
-                      <div className="pt-10 lg:pt-14 border-t border-border flex flex-col sm:flex-row gap-6 items-center justify-between">
-                         <div className="space-y-3 max-w-md mx-auto sm:mx-0">
-                            <h4 className="text-xl font-black tracking-tight text-foreground uppercase italic px-4 py-1 bg-primary/5 inline-block">Finalize Engagement</h4>
+                      {/* Finalization Section */}
+                      <div className="pt-16 border-t border-border/40 flex flex-col sm:flex-row gap-10 items-center justify-between">
+                         <div className="max-w-xl">
+                            <h4 className="text-2xl font-black tracking-tight text-foreground mb-3 flex items-center gap-3 italic">
+                               Promote to Portfolio <CheckCircle className="w-6 h-6 text-emerald-500" />
+                            </h4>
                             <p className="text-sm text-muted-foreground font-medium leading-relaxed">
-                               Once the sale is closed and technical deployment is complete, promote this lead to the **Portfolio Vault** to track service cycles and retention.
+                               If the contract is finalized and deployment has commenced, transfer this asset to the **Portfolio Vault** to track service cycles and retention.
                             </p>
                          </div>
                          <Button 
-                           variant="outline" 
                            size="lg"
                            disabled={selectedLeadForOutreach.status === 'closed'}
                            onClick={() => setIsPromotionDialogOpen(true)}
-                           className="h-12 px-10 rounded border-primary text-primary font-black text-[11px] uppercase tracking-widest hover:bg-primary hover:text-primary-foreground shadow-lg shadow-primary/5 transition-all active:scale-95 w-full sm:w-auto"
+                           className="h-16 px-12 rounded-full border-2 border-primary/30 text-primary font-black text-[11px] uppercase tracking-[0.3em] hover:bg-primary hover:text-white transition-all transform hover:-translate-y-1 shadow-lg shadow-primary/5 sm:w-auto w-full"
                          >
-                            <CheckCircle className="w-4 h-4 mr-2" /> 
-                            {selectedLeadForOutreach.status === 'closed' ? 'Contract Active' : 'Promote to Portfolio'}
+                            {selectedLeadForOutreach.status === 'closed' ? 'Contract Active' : 'Promote Asset'}
                          </Button>
                       </div>
                    </div>
 
-                   <div className="p-8 lg:p-12 bg-secondary/20 space-y-12">
-                       <section className="space-y-6">
-                          <h4 className="text-[11px] font-black text-foreground uppercase tracking-[0.3em] pb-3 border-b border-border/30">Target Metadata</h4>
-                          <div className="space-y-6">
+                   {/* Dossier Metadata Sidebar */}
+                   <div className="lg:col-span-1 bg-secondary/[0.03] p-8 lg:p-12 space-y-16">
+                       <section className="space-y-8">
+                          <h4 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.4em] pb-4 border-b border-border/40 flex items-center gap-2">
+                             <Database className="w-4 h-4 opacity-50" /> Asset Meta
+                          </h4>
+                          <div className="space-y-8">
                              {[
-                               { label: 'Category', value: selectedLeadForOutreach.category, icon: Star },
-                               { label: 'Market Vertical', value: selectedLeadForOutreach.category, icon: Zap },
-                               { label: 'Phone Channel', value: selectedLeadForOutreach.phone || 'N/A', icon: PhoneCall },
-                               { label: 'Digital Mail', value: selectedLeadForOutreach.email || 'N/A', icon: Mail }
+                               { label: 'Category', value: selectedLeadForOutreach.category, icon: LayoutGrid },
+                               { label: 'Sector Vertical', value: selectedLeadForOutreach.category, icon: ShieldCheck },
+                               { label: 'Voice Terminal', value: selectedLeadForOutreach.phone || 'Classified', icon: PhoneCall },
+                               { label: 'Network Mail', value: selectedLeadForOutreach.email || 'Encrypted', icon: Mail }
                              ].map((item, i) => (
-                               <div key={i} className="space-y-2">
-                                  <div className="flex items-center gap-2 text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">
-                                     <item.icon className="w-3.5 h-3.5 opacity-40 text-primary" /> {item.label}
+                               <div key={i} className="group cursor-default">
+                                  <div className="flex items-center gap-3 text-[9px] font-black text-muted-foreground uppercase tracking-[0.3em] mb-2 opacity-50 group-hover:opacity-100 transition-opacity">
+                                     <item.icon className="w-4 h-4 text-primary" /> {item.label}
                                   </div>
-                                  <p className="text-sm font-bold text-foreground leading-tight">{item.value}</p>
+                                  <p className="text-base font-bold text-foreground leading-tight tracking-tight group-hover:text-primary transition-colors">{item.value}</p>
                                </div>
                              ))}
                           </div>
                        </section>
 
-                       <section className="space-y-6">
-                          <h4 className="text-[11px] font-black text-foreground uppercase tracking-[0.3em] pb-3 border-b border-border/30">Social Topology</h4>
-                          <div className="flex flex-wrap gap-3">
+                       <section className="space-y-8">
+                          <h4 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.4em] pb-4 border-b border-border/40 flex items-center gap-2">
+                             <Share2 className="w-4 h-4 opacity-50" /> Social Nodes
+                          </h4>
+                          <div className="grid grid-cols-4 gap-4">
                              {selectedLeadForOutreach.socialLinks && selectedLeadForOutreach.socialLinks.length > 0 ? (
                                selectedLeadForOutreach.socialLinks.map((link, i) => (
                                  <a 
@@ -2525,28 +2648,29 @@ export default function App() {
                                    href={link} 
                                    target="_blank" 
                                    rel="noreferrer"
-                                   className="w-10 h-10 lg:w-12 lg:h-12 rounded bg-card border border-border flex items-center justify-center hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all shadow-xl hover:scale-110 active:scale-95"
+                                   className="aspect-square rounded-2xl bg-card border border-border/60 flex items-center justify-center hover:bg-primary hover:text-white hover:border-primary transition-all duration-300 shadow-sm transform hover:-translate-y-1"
                                  >
-                                    <ExternalLink className="w-4 h-4 lg:w-5 lg:h-5" />
+                                    <ExternalLink className="w-4 h-4" />
                                  </a>
                                ))
                              ) : (
-                               <p className="text-[10px] font-bold text-muted-foreground italic tracking-wide">No social footprints detected via digital scan.</p>
+                               <div className="col-span-full p-6 bg-secondary/10 rounded-2xl border border-dashed border-border/40 text-center">
+                                  <p className="text-[10px] font-bold text-muted-foreground italic tracking-widest leading-relaxed">No social footprints detected in current scan.</p>
+                               </div>
                              )}
                           </div>
                        </section>
 
-                       <div className="pt-12 border-t border-border/50">
+                       <div className="pt-16 border-t border-border/50">
                           <Button 
                             variant="destructive" 
-                            size="lg" 
-                            className="w-full h-12 lg:h-14 font-black text-[11px] lg:text-[12px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 rounded shadow-2xl shadow-destructive/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                            className="w-full h-16 font-black text-[11px] uppercase tracking-[0.3em] rounded-full shadow-[0_15px_35px_rgba(var(--destructive-rgb),0.2)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-4 border border-destructive/20"
                             onClick={() => {
                               deleteListing(selectedLeadForOutreach.id);
                               closeLeadDetail();
                             }}
                           >
-                             <Trash2 className="w-4 h-4 lg:w-5 lg:h-5" /> Decommission Lead
+                             <Trash2 className="w-5 h-5" /> Purge Asset
                           </Button>
                        </div>
                    </div>
