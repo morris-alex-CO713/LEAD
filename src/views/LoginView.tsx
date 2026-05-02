@@ -3,21 +3,30 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 
 interface LoginViewProps {
-  onLogin: (email: string, password: string) => boolean;
+  onLogin: (email: string, password: string) => Promise<void>;
 }
 
 export function LoginView({ onLogin }: LoginViewProps) {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    const success = onLogin(loginEmail, loginPassword);
-    if (success) {
-      toast.success("Welcome back, Akash!");
-    } else {
-      toast.error("Invalid credentials. Please use akash@prospect.com / prospect2026");
+  const handleLogin = async () => {
+    if (!loginEmail || !loginPassword) {
+      toast.error("Please enter your email and password.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await onLogin(loginEmail, loginPassword);
+      toast.success("Welcome back!");
+    } catch (err: any) {
+      toast.error("Invalid credentials. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -35,30 +44,33 @@ export function LoginView({ onLogin }: LoginViewProps) {
           <div className="space-y-5">
             <div className="space-y-2.5">
               <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Email Address</label>
-              <Input 
-                type="email" 
-                placeholder="akash@prospect.com" 
+              <Input
+                type="email"
+                placeholder="you@example.com"
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
                 className="h-11 border-border bg-background rounded-md focus:ring-primary/20 transition-all font-medium"
               />
             </div>
             <div className="space-y-2.5">
               <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Credentials</label>
-              <Input 
-                type="password" 
-                placeholder="••••••••" 
+              <Input
+                type="password"
+                placeholder="••••••••"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
                 className="h-11 border-border bg-background rounded-md focus:ring-primary/20 transition-all font-medium"
               />
             </div>
           </div>
-          <Button 
-            onClick={handleLogin} 
+          <Button
+            onClick={handleLogin}
+            disabled={loading}
             className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-primary/10 mt-6"
           >
-            Initialize Access
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Initialize Access"}
           </Button>
           <div className="text-center mt-8">
             <p className="text-[10px] text-muted-foreground/50 font-bold uppercase tracking-[0.3em]">Authorized Terminal Only</p>

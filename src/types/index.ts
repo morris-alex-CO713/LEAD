@@ -63,3 +63,16 @@ export interface ScanHistory {
   resultsCount: number;
   timestamp: any;
 }
+
+export interface ApiUsageLog {
+  id: string;
+  type: 'search' | 'outreach' | 'renewal';
+  model: string;
+  promptTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  success: boolean;
+  error?: string;
+  timestamp: any;
+}

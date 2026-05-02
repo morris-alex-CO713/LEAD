@@ -1,12 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { auth, db } from './firebase';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User 
-} from 'firebase/auth';
+import { useAuth } from './hooks/useAuth';
 import { 
   onSnapshot,
   collection,
@@ -70,18 +64,14 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { GoogleGenAI, Type } from "@google/genai";
-import { 
-  DragDropContext, 
-  Droppable, 
-  Draggable, 
-  DropResult 
-} from '@hello-pangea/dnd';
+import { DropResult } from '@hello-pangea/dnd';
 import { motion, AnimatePresence } from 'motion/react';
 import BusinessSelectorMap from './components/Map';
 import { 
   BusinessResult,
-  searchAndAuditBusinesses 
+  searchAndAuditBusinesses,
+  generateOutreachDrafts,
+  generateRenewalDraft
 } from './lib/gemini';
 import { 
   Dialog,
@@ -96,7 +86,12 @@ import Sidebar from './components/Sidebar';
 import BottomNav from './components/BottomNav';
 import StatsGrid from './components/StatsGrid';
 import LeadCard from './components/LeadCard';
+import KanbanBoard from './components/KanbanBoard';
 import { FirebaseService } from './services/firebaseService';
+import NicheBrowser from './components/NicheBrowser';
+import { LoginView } from './views/LoginView';
+import { DashboardView } from './views/DashboardView';
+import UsageView from './views/UsageView';
 import { 
   BusinessListing, 
   PortfolioClient, 
@@ -127,8 +122,7 @@ export default function App() {
     return 'light';
   });
 
-  const [user, setUser] = useState<{ email: string } | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const { user, profile, loading: authLoading, handleLogin, handleLogout } = useAuth();
   const [listings, setListings] = useState<BusinessListing[]>([]);
   const [scans, setScans] = useState<ScanHistory[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioClient[]>([]);
@@ -139,6 +133,7 @@ export default function App() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchRadius, setSearchRadius] = useState(5); // Default 5km
   const [searchMaxResults, setSearchMaxResults] = useState(10); // Default 10 results
+  const [nicheBrowserOpen, setNicheBrowserOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [previousTab, setPreviousTab] = useState('dashboard');
   const [searchFilter, setSearchFilter] = useState('');
@@ -183,10 +178,6 @@ export default function App() {
   const [crmCategoryFilter, setCrmCategoryFilter] = useState<string | null>(null);
   const [crmStatusTab, setCrmStatusTab] = useState<'all' | 'reached'>('all');
 
-  // Login form state
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-
   // Map state
   const [selectedLat, setSelectedLat] = useState(0);
   const [selectedLng, setSelectedLng] = useState(0);
@@ -195,6 +186,9 @@ export default function App() {
   const [selectedLeadForOutreach, setSelectedLeadForOutreach] = useState<BusinessListing | null>(null);
   const [generatingOutreach, setGeneratingOutreach] = useState(false);
   const [outreachTone, setOutreachTone] = useState<'professional' | 'aggressive' | 'helpful' | 'curious'>('professional');
+  const [renewalClient, setRenewalClient] = useState<PortfolioClient | null>(null);
+  const [renewalDraft, setRenewalDraft] = useState<{ subject: string; email: string } | null>(null);
+  const [generatingRenewal, setGeneratingRenewal] = useState(false);
   const [activeBoardView, setActiveBoardView] = useState<'list' | 'kanban'>('list');
   const mainContentRef = useRef<HTMLElement>(null);
 
@@ -204,8 +198,6 @@ export default function App() {
       mainContentRef.current.scrollTo(0, 0);
     }
   }, [activeTab, selectedLeadForOutreach]);
-
-  const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   const openLeadDetail = (lead: BusinessListing) => {
     setPreviousTab(activeTab);
@@ -222,45 +214,8 @@ export default function App() {
     if (!lead) return;
     setGeneratingOutreach(true);
     try {
-      const tonePrompts = {
-        professional: "Tone: Executive, strategic, and authoritative.",
-        aggressive: "Tone: Urgent, direct, and highlighting the risk of lost revenue to competitors.",
-        helpful: "Tone: Empathetic, supportive, and positioning yourself as a local partner.",
-        curious: "Tone: Low-pressure, inquisitive, and asking if they are even aware of the technical gaps."
-      };
+      const responseData = await generateOutreachDrafts(lead, outreachTone);
 
-      const prompt = `Synthesize a high-conversion, personalized outreach sequence for "${lead.name}".
-      Target Industry: ${lead.category}
-      Location: ${lead.address}
-      
-      Vulnerability Analysis:
-      - SEO Infrastructure Score: ${lead.technicalAudit.seoScore}/10
-      - Performance Latency: ${lead.technicalAudit.loadSpeed || 'Unknown'}
-      - Domain Discovery Strategy: ${lead.outreachStrategy}
-      
-      Requirements:
-      1. One concise, value-first Email centered on fixing their specific technical gaps.
-      2. One high-engagement LinkedIn connection request note.
-      3. ${tonePrompts[outreachTone]} Avoid generic fluff.`;
-
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              email: { type: Type.STRING },
-              linkedin: { type: Type.STRING }
-            },
-            required: ["email", "linkedin"]
-          }
-        }
-      });
-
-      const responseData = JSON.parse(response.text || '{}');
-      
       const updatedLead = {
         ...lead,
         outreachDrafts: {
@@ -269,7 +224,7 @@ export default function App() {
           lastGenerated: Date.now()
         }
       };
-      
+
       setListings(prev => prev.map(l => l.id === lead.id ? updatedLead : l));
       setSelectedLeadForOutreach(updatedLead);
       if (activeTab !== 'lead-detail') {
@@ -279,7 +234,7 @@ export default function App() {
       await updateDoc(doc(db, 'business_listings', lead.id), {
         outreachDrafts: updatedLead.outreachDrafts
       });
-      
+
       toast.success("AI Outreach Drafts Generated!");
     } catch (err) {
       console.error(err);
@@ -289,8 +244,21 @@ export default function App() {
     }
   };
 
-  const onDragEnd = async (result: DropResult) => {
-    if (!result.destination) return;
+  const handleGenerateRenewal = async (client: PortfolioClient) => {
+    setRenewalClient(client);
+    setRenewalDraft(null);
+    setGeneratingRenewal(true);
+    try {
+      const draft = await generateRenewalDraft(client);
+      setRenewalDraft(draft);
+    } catch (err) {
+      toast.error('Failed to generate renewal draft.');
+    } finally {
+      setGeneratingRenewal(false);
+    }
+  };
+
+  const onDragEnd = async (result: DropResult) => {    if (!result.destination) return;
     
     const { draggableId, destination } = result;
     const newStatus = destination.droppableId as BusinessListing['status'];
@@ -385,18 +353,6 @@ export default function App() {
 
   useEffect(() => {
     testFirestoreConnection();
-
-    // Check local storage for persistent session
-    const savedUser = localStorage.getItem('prospect_user');
-    if (savedUser) {
-      const u = JSON.parse(savedUser);
-      setUser(u);
-      setProfile({
-        email: u.email,
-        role: 'admin',
-        displayName: 'Akash Admin'
-      });
-    }
   }, []);
 
   useEffect(() => {
@@ -478,34 +434,11 @@ export default function App() {
     }
   };
 
-  const handleLogin = () => {
-    if (loginEmail === 'akash@prospect.com' && loginPassword === 'prospect2026') {
-      const u = { email: loginEmail };
-      setUser(u);
-      setProfile({
-        email: loginEmail,
-        role: 'admin',
-        displayName: 'Akash Admin'
-      });
-      localStorage.setItem('prospect_user', JSON.stringify(u));
-      toast.success("Welcome back, Akash!");
-    } else {
-      toast.error("Invalid credentials. Please use akash@prospect.com / prospect2026");
-    }
-  };
-
   const isServiceNear = (date: any) => {
     if (!date) return false;
     const d = new Date(date);
     const diff = d.getTime() - new Date().getTime();
     return diff > 0 && diff < 7 * 24 * 60 * 60 * 1000;
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setProfile(null);
-    localStorage.removeItem('prospect_user');
-    toast.success("Logged out successfully.");
   };
 
   const handleRandomSearch = () => {
@@ -530,22 +463,32 @@ export default function App() {
       } else {
         toast.success(`Found ${results.length} businesses!`);
         setSearchResults(results);
+
+        // Auto-save all results to CRM
+        const unsaved = results.filter(r => !listings.some(l => l.name === r.name && l.address === r.address));
+        if (unsaved.length > 0) {
+          for (const res of unsaved) {
+            try { await FirebaseService.saveListing(res); } catch (e) { console.error(`Failed to save ${res.name}`, e); }
+          }
+          toast.success(`${unsaved.length} lead${unsaved.length > 1 ? 's' : ''} saved to CRM.`);
+        }
+
         setActiveTab('search-results');
 
-        // Log to scan history with ALL results and enhanced metadata
+        // Log to scan history
         await FirebaseService.addScanHistory({
           location: searchLocation,
           keyword: searchKeyword,
           count: results.length,
-          uid: auth.currentUser?.uid || 'akash-prospect-admin',
+          uid: auth.currentUser?.uid || '',
           results: results,
           radius: searchRadius,
           city: searchLocation.split(',')[0].trim(),
           timestamp: serverTimestamp()
         });
       }
-    } catch (e) {
-      toast.error("Search failed.");
+    } catch (e: any) {
+      toast.error(`Search failed: ${e?.message || 'Unknown error'}`);
     } finally {
       setSearching(false);
     }
@@ -672,9 +615,9 @@ export default function App() {
   };
 
   const filteredListings = listings.filter(l => {
-    const matchesSearch = l.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-           l.address.toLowerCase().includes(searchFilter.toLowerCase()) ||
-           l.category.toLowerCase().includes(searchFilter.toLowerCase());
+    const matchesSearch = (l.name || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
+           (l.address || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
+           (l.category || '').toLowerCase().includes(searchFilter.toLowerCase());
     if (!matchesSearch) return false;
     if (dashboardFilter === 'no-website') return !l.hasWebsite;
     if (dashboardFilter === 'poor-ux') return l.hasWebsite && !l.isWebsiteGood;
@@ -683,9 +626,9 @@ export default function App() {
   });
 
   const filteredCrmList = listings.filter(l => {
-    const matchesCrmSearch = l.name.toLowerCase().includes(crmSearch.toLowerCase()) || 
-                           l.category.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                           l.address.toLowerCase().includes(crmSearch.toLowerCase());
+    const matchesCrmSearch = (l.name || '').toLowerCase().includes(crmSearch.toLowerCase()) || 
+                           (l.category || '').toLowerCase().includes(crmSearch.toLowerCase()) ||
+                           (l.address || '').toLowerCase().includes(crmSearch.toLowerCase());
     const matchesStatus = crmStatusTab === 'all' ? true : l.connectionDone;
     const matchesCategory = crmCategoryFilter ? l.category === crmCategoryFilter : true;
     return matchesCrmSearch && matchesStatus && matchesCategory;
@@ -773,16 +716,16 @@ export default function App() {
                 <div className="p-6 bg-secondary/20 rounded border border-border">
                   <p className="text-[10px] font-bold uppercase tracking-widest mb-2">SEO Status</p>
                   <div className="flex items-center justify-between font-black text-2xl">
-                    <span>{sharedLead.technicalAudit.seoScore}/10</span>
-                    <Badge variant={sharedLead.technicalAudit.seoScore > 7 ? "secondary" : "destructive"} className="uppercase font-bold text-[9px]">
-                      {sharedLead.technicalAudit.seoScore > 7 ? "Healthy" : "Critical"}
+                    <span>{sharedLead.technicalAudit?.seoScore ?? 'N/A'}/10</span>
+                    <Badge variant={( sharedLead.technicalAudit?.seoScore ?? 0) > 7 ? "secondary" : "destructive"} className="uppercase font-bold text-[9px]">
+                      {(sharedLead.technicalAudit?.seoScore ?? 0) > 7 ? "Healthy" : "Critical"}
                     </Badge>
                   </div>
                 </div>
                 <div className="p-6 bg-secondary/20 rounded border border-border">
                   <p className="text-[10px] font-bold uppercase tracking-widest mb-2">Mobile Performance</p>
                   <div className="flex items-center justify-between font-black text-2xl uppercase">
-                    <span>{sharedLead.technicalAudit.loadSpeed}</span>
+                    <span>{sharedLead.technicalAudit?.loadSpeed ?? 'N/A'}</span>
                     <Badge variant="outline" className="border-primary/20 text-primary uppercase font-bold text-[9px]">Latency Audit</Badge>
                   </div>
                 </div>
@@ -823,7 +766,7 @@ export default function App() {
     );
   }
 
-  if (loading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="space-y-4 text-center">
@@ -841,52 +784,7 @@ export default function App() {
   }
 
   if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-6">
-        <Card className="w-full max-w-sm bg-card border border-border shadow-2xl overflow-hidden rounded-md">
-          <CardHeader className="text-left p-8 sm:p-10 space-y-2">
-            <h1 className="text-3xl font-bold tracking-tighter text-foreground uppercase italic mb-4">prospect.io</h1>
-            <CardTitle className="text-2xl font-bold tracking-tighter text-foreground uppercase">Access Terminal</CardTitle>
-            <CardDescription className="text-muted-foreground font-medium tracking-tight text-sm">
-              Secured gateway for high-density lead acquisition.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-8 sm:p-10 space-y-6 pt-0">
-             <div className="space-y-5">
-               <div className="space-y-2.5">
-                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Email Address</label>
-                 <Input 
-                   type="email" 
-                   placeholder="akash@prospect.com" 
-                   value={loginEmail}
-                   onChange={(e) => setLoginEmail(e.target.value)}
-                   className="h-11 border-border bg-background rounded-md focus:ring-primary/20 transition-all font-medium"
-                 />
-               </div>
-               <div className="space-y-2.5">
-                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Credentials</label>
-                 <Input 
-                   type="password" 
-                   placeholder="••••••••" 
-                   value={loginPassword}
-                   onChange={(e) => setLoginPassword(e.target.value)}
-                   className="h-11 border-border bg-background rounded-md focus:ring-primary/20 transition-all font-medium"
-                 />
-               </div>
-             </div>
-            <Button 
-              onClick={handleLogin} 
-              className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-primary/10 mt-6"
-            >
-              Initialize Access
-            </Button>
-            <div className="text-center mt-8">
-               <p className="text-[10px] text-muted-foreground/50 font-bold uppercase tracking-[0.3em]">Authorized Terminal Only</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <LoginView onLogin={handleLogin} />;
   }
 
   return (
@@ -908,12 +806,14 @@ export default function App() {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         theme={theme} 
-        setTheme={setTheme} 
+        setTheme={setTheme}
+        profile={profile}
+        onLogout={handleLogout}
       />
 
       {/* Extraction Modal */}
-      <Dialog open={searching} onOpenChange={setSearching}>
-        <DialogContent className="sm:max-w-md bg-card border border-border shadow-lg p-0 overflow-hidden rounded-lg">
+      <Dialog open={searching} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md bg-card border border-border shadow-lg p-0 overflow-hidden rounded-lg [&>button]:hidden">
           <div className="relative h-[220px] w-full bg-card flex flex-col items-center justify-center p-8 overflow-hidden">
             {/* Visual Background Pattern */}
             <div className="absolute inset-0 opacity-5 pointer-events-none">
@@ -958,232 +858,39 @@ export default function App() {
       </Dialog>
 
       {/* MAIN CONTENT */}
-      <main ref={mainContentRef} className={`flex-1 overflow-y-auto mb-16 lg:mb-0 ${activeTab === 'lead-detail' ? 'p-0' : 'p-4 sm:p-6 lg:p-12'}`}>
+      <main ref={mainContentRef} className={`flex-1 overflow-y-auto mb-16 lg:mb-0 pt-14 lg:pt-0 ${activeTab === 'lead-detail' ? 'p-0 pt-14 lg:pt-0' : 'p-4 sm:p-6 lg:p-12'}`}>
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
-            <div className="space-y-12">
-            <motion.div 
-                key="dashboard"
-                initial={{ opacity: 0, scale: 0.99 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.99 }}
-                className="space-y-6 sm:space-y-10 focus:outline-none"
-              >
-                <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pb-6 border-b border-border/60">
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tighter text-foreground mb-1 mr-4 lg:mb-2 text-left uppercase">Neural Dashboard</h1>
-                    <p className="text-muted-foreground font-medium text-[11px] sm:text-sm lg:text-base text-left flex flex-wrap items-center gap-x-2">
-                      Target Acquisition Mode: <span className="text-primary font-bold">{listings.filter(l => l.status === 'new').length} New Prospects</span>
-                    </p>
-                  </div>
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <Button variant="outline" onClick={exportToCSV} className="flex-1 sm:flex-none rounded-md border-border font-bold text-[9px] uppercase tracking-widest h-10 px-4 bg-card shadow-sm hover:bg-secondary transition-all">
-                      Export Dataset
-                    </Button>
-                    <Button onClick={() => setActiveTab('search')} className="flex-1 sm:flex-none border-none bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 font-bold text-[9px] uppercase tracking-widest px-4 sm:px-6 h-10 rounded-md gap-2 transition-all active:scale-95">
-                      <Plus className="w-3.5 h-3.5" /> Acquire
-                    </Button>
-                  </div>
-                </header>
-
-                <StatsGrid 
-                  listingCount={listings.length}
-                  conversionCount={listings.filter(l => l.status === 'qualified' || l.status === 'closed').length}
-                  scanCount={scans.length}
-                  portfolioCount={portfolio.length}
-                />
-
-                <div className="space-y-8 pt-6">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-border/60">
-                    <h2 className="text-xl lg:text-2xl font-bold text-foreground tracking-tight">Recent Acquisitions</h2>
-                    <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-                       <div className="relative">
-                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                          <Input 
-                            placeholder="Search database..." 
-                            className="pl-11 h-10 w-full md:w-64 lg:w-72 border-border bg-card shadow-sm rounded-md font-medium text-sm placeholder:text-muted-foreground/50 focus:ring-2 focus:ring-primary/10 transition-all"
-                            value={searchFilter}
-                            onChange={(e) => setSearchFilter(e.target.value)}
-                          />
-                       </div>
-                      <div className="flex gap-2">
-                        <div className="flex gap-1 bg-secondary p-1 rounded-md">
-                          <button 
-                            onClick={() => setActiveBoardView('list')}
-                            className={`p-1.5 rounded-sm transition-all ${activeBoardView === 'list' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                          >
-                            <TableProperties className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => setActiveBoardView('kanban')}
-                            className={`p-1.5 rounded-sm transition-all ${activeBoardView === 'kanban' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                          >
-                            <ColumnsIcon className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="flex gap-1 bg-secondary p-1 rounded-md overflow-x-auto no-scrollbar">
-                       {[
-                         { id: null, label: 'All' },
-                         { id: 'no-website', label: 'No Web' },
-                         { id: 'poor-ux', label: 'Legacy' },
-                         { id: 'high-priority', label: 'Priority' }
-                       ].map(f => (
-                         <button
-                           key={f.id}
-                           onClick={() => setDashboardFilter(f.id)}
-                           className={`text-[9px] font-bold px-3 lg:px-4 py-2 rounded-sm transition-all uppercase tracking-wider whitespace-nowrap ${
-                             dashboardFilter === f.id 
-                               ? 'bg-card text-foreground shadow-sm' 
-                               : 'text-muted-foreground hover:text-foreground'
-                           }`}
-                         >
-                           {f.label}
-                         </button>
-                       ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {activeBoardView === 'list' ? (
-                  <div className="grid grid-cols-1 gap-2">
-                    {filteredListings.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center p-12 bg-card rounded-md border border-border shadow-sm">
-                         <LayoutDashboard className="w-8 h-8 text-muted-foreground/20 mb-4" />
-                         <p className="text-muted-foreground font-black uppercase tracking-widest text-[10px]">No active data streams</p>
-                      </div>
-                    ) : (
-                      filteredListings.slice(0, 5).map((l) => (
-                        <LeadCard 
-                          key={l.id} 
-                          listing={l} 
-                          onClick={() => openLeadDetail(l)} 
-                        />
-                      ))
-                    )}
-                  </div>
-                ) : (
-                  <DragDropContext onDragEnd={onDragEnd}>
-                    <div className="overflow-x-auto no-scrollbar -mx-6 px-6 lg:mx-0 lg:px-0 scroll-smooth">
-                      <div className="flex gap-4 min-w-[1000px] lg:min-w-0 lg:grid lg:grid-cols-4 lg:gap-6 pb-10 min-h-[600px]">
-                        {(['new', 'qualified', 'contacted', 'closed'] as const).map(status => (
-                          <Droppable droppableId={status} key={status}>
-                          {(provided, snapshot) => (
-                            <div 
-                              {...provided.droppableProps}
-                              ref={provided.innerRef}
-                              className={`flex flex-col h-full bg-secondary/20 rounded-md p-4 min-h-[500px] border border-border/30 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/5 border-primary/20' : ''}`}
-                            >
-                              <div className="flex items-center justify-between mb-6 px-1">
-                                <h4 className="text-[9px] font-black text-muted-foreground uppercase tracking-[0.25em] flex items-center gap-2">
-                                  <div className={`w-1.5 h-1.5 rounded-full ${
-                                    status === 'new' ? 'bg-primary shadow-[0_0_8px_rgba(59,130,246,0.5)]' :
-                                    status === 'qualified' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
-                                    status === 'contacted' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' :
-                                    'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]'
-                                  }`} />
-                                  {status}
-                                </h4>
-                                <span className="text-[9px] font-black text-muted-foreground/50 bg-secondary px-1.5 py-0.5 rounded border border-border/50">
-                                  {listings.filter(l => l.status === status).length}
-                                </span>
-                              </div>
-
-                              <div className="flex flex-col gap-3 h-full">
-                                {listings.filter(l => l.status === status).map((biz, index) => {
-                                  return (
-                                    <Draggable draggableId={biz.id} index={index} key={biz.id}>
-                                      {(provided, snapshot) => (
-                                        <LeadCard 
-                                          listing={biz} 
-                                          onClick={() => openLeadDetail(biz)}
-                                          draggableProps={provided.draggableProps}
-                                          dragHandleProps={provided.dragHandleProps}
-                                          innerRef={provided.innerRef}
-                                          isDragging={snapshot.isDragging}
-                                          isKanban={true}
-                                        />
-                                      )}
-                                    </Draggable>
-                                  );
-                                })}
-                                {provided.placeholder}
-                              </div>
-                            </div>
-                          )}
-                        </Droppable>
-                      ))}
-                      </div>
-                    </div>
-                   </DragDropContext>
-                )}
-            </motion.div>
-
-            {/* Operational Intelligence Protocol - Only on Dashboard */}
-            <section className="mt-12 border-t border-border pt-12 pb-12 relative overflow-hidden">
-               <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
-               <div className="max-w-4xl">
-                  <div className="flex items-center gap-3 mb-8">
-                     <div className="w-8 h-8 rounded bg-primary/10 border border-primary/20 flex items-center justify-center">
-                        <ShieldCheck className="w-4 h-4 text-primary" />
-                     </div>
-                     <h2 className="text-sm font-bold text-foreground uppercase tracking-[0.3em]">Operational Intelligence Protocol</h2>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-                     <div className="space-y-4">
-                        <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                           <Search className="w-3 h-3" /> Acquisition
-                        </h3>
-                        <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                           Deploy sensors via the <b>Satellite Scanner</b> to identify local businesses. Our Gemini-powered engine audits their digital infrastructure in real-time.
-                        </p>
-                     </div>
-                     <div className="space-y-4">
-                        <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                           <Zap className="w-3 h-3" /> Evaluation
-                        </h3>
-                        <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                           Review <b>Propensity Scores</b>. A score above 7 indicates a high probability of technical debt and immediate need for infrastructure upgrades.
-                        </p>
-                     </div>
-                     <div className="space-y-4">
-                        <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2">
-                           <MessageSquare className="w-3 h-3" /> Execution
-                        </h3>
-                        <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                           Save leads to your <b>CRM</b> to unlock personalized outreach sequences. Use the <b>Lead detail</b> view to generate AI-tailored communication.
-                        </p>
-                     </div>
-                  </div>
-
-                  <div className="mt-12 p-4 rounded bg-primary/5 border border-primary/10 flex flex-col md:flex-row items-center justify-between gap-4">
-                     <p className="text-[10px] text-primary font-bold uppercase tracking-widest italic">Always verify digital signatures before initiating outreach protocols.</p>
-                     <Badge variant="outline" className="bg-primary text-primary-foreground border-none px-3 py-1 text-[9px] font-black uppercase tracking-widest">v1.2 Active</Badge>
-                  </div>
-               </div>
-            </section>
-            </div>
+            <DashboardView
+              listings={listings}
+              scans={scans}
+              portfolio={portfolio}
+              searchFilter={searchFilter}
+              setSearchFilter={setSearchFilter}
+              dashboardFilter={dashboardFilter}
+              setDashboardFilter={setDashboardFilter}
+              filteredListings={filteredListings}
+              onLeadClick={openLeadDetail}
+              onExportCSV={exportToCSV}
+              onNewSearch={() => setActiveTab('search')}
+            />
           )}
 
-
-              {activeTab === 'search' && (
-            <motion.div 
+          {activeTab === 'search' && (
+            <motion.div
               key="search"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 lg:left-64 flex flex-col h-screen overflow-hidden z-[40]"
             >
-
-              {/* Overlay Search Box (Floating) */}
-              <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex flex-col sm:flex-row gap-2 w-full max-w-[90%] sm:max-w-4xl pointer-events-none">
-                 <div className="flex-1 bg-card/80 backdrop-blur-xl border border-border/50 shadow-2xl rounded-lg p-4 pointer-events-auto flex flex-col sm:flex-row gap-3">
+              {/* ── Desktop Floating Search Bar ── */}
+              <div className="hidden sm:flex absolute top-6 left-1/2 -translate-x-1/2 z-40 gap-2 w-full max-w-[90%] sm:max-w-4xl pointer-events-none">
+                 <div className="flex-1 bg-card/80 backdrop-blur-xl border border-border/50 shadow-2xl rounded-lg p-4 pointer-events-auto flex flex-row gap-3">
                     <div className="flex-1 relative">
                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                       <Input 
-                         placeholder="Location..." 
+                       <Input
+                         placeholder="Location..."
                          value={searchLocation}
                          onChange={(e) => setSearchLocation(e.target.value)}
                          className="pl-9 h-10 border-none bg-secondary/50 font-bold focus-visible:ring-0"
@@ -1221,6 +928,14 @@ export default function App() {
                     <div className="flex gap-2">
                        <Button 
                          variant="secondary" 
+                         onClick={() => setNicheBrowserOpen(true)}
+                         className="h-10 px-3 bg-secondary/50 hover:bg-secondary border-none"
+                         title="Browse Business Categories"
+                       >
+                         <LayoutGrid className="w-4 h-4" />
+                       </Button>
+                       <Button 
+                         variant="secondary" 
                          onClick={handleRandomSearch}
                          className="h-10 px-3 bg-secondary/50 hover:bg-secondary border-none"
                          title="Random Discovery"
@@ -1238,8 +953,8 @@ export default function App() {
                  </div>
               </div>
 
-              {/* Suggestions Overlay */}
-              <div className="absolute top-32 left-1/2 -translate-x-1/2 z-30 flex flex-wrap gap-1.5 w-full max-w-4xl justify-center pointer-events-none">
+              {/* ── Desktop Suggestions ── */}
+              <div className="hidden sm:flex absolute top-32 left-1/2 -translate-x-1/2 z-30 flex-wrap gap-1.5 w-full max-w-4xl justify-center pointer-events-none">
                 {SUGGESTED_NICHES.slice(0, 5).map(niche => (
                   <button 
                     key={niche}
@@ -1255,8 +970,128 @@ export default function App() {
                 ))}
               </div>
 
+              {/* ── Mobile Search Panel (top) ── */}
+              <div className="sm:hidden absolute top-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-xl border-b border-border shadow-xl pointer-events-auto">
+                <div className="p-3 space-y-2">
+                  {/* Row 1: Location + Niche */}
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Location..."
+                        value={searchLocation}
+                        onChange={(e) => setSearchLocation(e.target.value)}
+                        className="pl-9 h-9 border-border bg-secondary/50 font-bold focus-visible:ring-0 text-sm"
+                      />
+                    </div>
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Niche..."
+                        value={searchKeyword}
+                        onChange={(e) => setSearchKeyword(e.target.value)}
+                        className="pl-9 h-9 border-border bg-secondary/50 font-bold focus-visible:ring-0 text-sm"
+                      />
+                    </div>
+                  </div>
+                  {/* Row 2: KM + Qty + Buttons */}
+                  <div className="flex gap-2">
+                    <div className="w-20 relative">
+                      <Activity className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        placeholder="KM"
+                        value={searchRadius}
+                        onChange={(e) => setSearchRadius(Number(e.target.value))}
+                        className="pl-8 h-9 border-border bg-secondary/50 font-bold focus-visible:ring-0 text-sm"
+                      />
+                    </div>
+                    <div className="w-20 relative">
+                      <ListFilter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        placeholder="Qty"
+                        value={searchMaxResults}
+                        onChange={(e) => setSearchMaxResults(Number(e.target.value))}
+                        className="pl-8 h-9 border-border bg-secondary/50 font-bold focus-visible:ring-0 text-sm"
+                      />
+                    </div>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setNicheBrowserOpen(true)}
+                      className="h-9 px-3 bg-secondary/50 hover:bg-secondary border border-border"
+                      title="Browse Categories"
+                    >
+                      <LayoutGrid className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={handleRandomSearch}
+                      className="h-9 px-3 bg-secondary/50 hover:bg-secondary border border-border"
+                      title="Random"
+                    >
+                      <Zap className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      onClick={handleSearch}
+                      disabled={searching}
+                      className="flex-1 h-9 font-black text-[10px] uppercase tracking-widest shadow-lg"
+                    >
+                      {searching ? "..." : "Launch"}
+                    </Button>
+                  </div>
+                  {/* Row 3: Quick niche chips */}
+                  <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                    {SUGGESTED_NICHES.slice(0, 8).map(niche => (
+                      <button
+                        key={niche}
+                        onClick={() => setSearchKeyword(niche)}
+                        className={`shrink-0 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border transition-all ${
+                          searchKeyword === niche
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-secondary/50 text-muted-foreground border-border'
+                        }`}
+                      >
+                        {niche}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Niche Browser Panel */}
+              <AnimatePresence>
+                {nicheBrowserOpen && (
+                  <>
+                    {/* Backdrop */}
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute inset-0 bg-black/40 backdrop-blur-sm z-[45]"
+                      onClick={() => setNicheBrowserOpen(false)}
+                    />
+                    {/* Panel */}
+                    <motion.div
+                      initial={{ opacity: 0, x: -40 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -40 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                      className="absolute top-6 left-4 sm:left-8 z-[46] w-[340px] max-w-[90vw]"
+                      style={{ maxHeight: 'calc(100vh - 48px)' }}
+                    >
+                      <NicheBrowser
+                        selectedNiche={searchKeyword}
+                        onSelect={(niche) => setSearchKeyword(niche)}
+                        onClose={() => setNicheBrowserOpen(false)}
+                      />
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+
               {/* Full Screen Map */}
-              <div className="flex-1 w-full h-full">
+              <div className="flex-1 w-full h-full sm:mt-0 mt-[168px]">
                 <BusinessSelectorMap 
                   lat={selectedLat} 
                   lng={selectedLng} 
@@ -1268,7 +1103,7 @@ export default function App() {
                       lat: r.lat,
                       lng: r.lng,
                       leadScore: r.leadScore,
-                      seoScore: r.technicalAudit.seoScore,
+                      seoScore: r.technicalAudit?.seoScore ?? 0,
                       isCrm: false
                     })),
                     ...listings.filter(l => l.lat && l.lng).map(l => ({
@@ -1277,7 +1112,7 @@ export default function App() {
                       lat: l.lat,
                       lng: l.lng,
                       leadScore: l.leadScore,
-                      seoScore: l.technicalAudit.seoScore,
+                      seoScore: l.technicalAudit?.seoScore ?? 0,
                       isCrm: true
                     }))
                   ]}
@@ -1425,10 +1260,10 @@ export default function App() {
                                </div>
                                <div className="flex items-center gap-4">
                                   <div className="flex items-center gap-1.5 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-                                     <Monitor className="w-3 h-3 text-border" /> {biz.technicalAudit.loadSpeed}
+                                     <Monitor className="w-3 h-3 text-border" /> {biz.technicalAudit?.loadSpeed ?? 'N/A'}
                                   </div>
                                   <div className="flex items-center gap-1.5 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-                                     <Zap className="w-3 h-3 text-border" /> SEO: {biz.technicalAudit.seoScore}
+                                     <Zap className="w-3 h-3 text-border" /> SEO: {biz.technicalAudit?.seoScore ?? 'N/A'}
                                   </div>
                                 </div>
                             </div>
@@ -1994,6 +1829,32 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'kanban' && (
+            <motion.div
+              key="kanban"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pb-6 border-b border-border">
+                <div>
+                  <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em] mb-1">Pipeline</p>
+                  <h1 className="text-2xl font-bold tracking-tight text-foreground">Kanban Board</h1>
+                  <p className="text-muted-foreground text-xs mt-1">Drag and drop leads to update their status.</p>
+                </div>
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                  {listings.length} total leads
+                </div>
+              </header>
+              <KanbanBoard
+                listings={listings}
+                onDragEnd={onDragEnd}
+                onLeadClick={openLeadDetail}
+              />
+            </motion.div>
+          )}
+
           {activeTab === 'portfolio' && (
             <motion.div 
               key="portfolio"
@@ -2165,8 +2026,15 @@ export default function App() {
                               <Button variant="outline" size="sm" className="w-full h-9 rounded border-border bg-card font-black text-[9px] uppercase tracking-widest hover:bg-secondary">
                                  Manage Assets
                               </Button>
-                              <Button size="sm" className="w-full h-9 rounded bg-primary text-primary-foreground font-black text-[9px] uppercase tracking-widest shadow-md">
-                                 Renewal Draft
+                              <Button
+                                size="sm"
+                                className="w-full h-9 rounded bg-primary text-primary-foreground font-black text-[9px] uppercase tracking-widest shadow-md"
+                                onClick={() => handleGenerateRenewal(client)}
+                                disabled={generatingRenewal && renewalClient?.id === client.id}
+                              >
+                                {generatingRenewal && renewalClient?.id === client.id ? (
+                                  <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Generating...</>
+                                ) : 'Renewal Draft'}
                               </Button>
                            </div>
                         </div>
@@ -2261,6 +2129,17 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'usage' && (
+            <motion.div
+              key="usage"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <UsageView />
+            </motion.div>
+          )}
+
           {activeTab === 'lead-detail' && selectedLeadForOutreach && (
             <motion.div 
               key="lead-detail"
@@ -2295,6 +2174,15 @@ export default function App() {
                         </div>
                         <p className="text-gray-600 text-sm flex items-center gap-2">
                            <MapPin className="w-4 h-4 text-gray-400" /> {selectedLeadForOutreach.address}
+                           <a
+                             href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedLeadForOutreach.name + ' ' + selectedLeadForOutreach.address)}`}
+                             target="_blank"
+                             rel="noreferrer"
+                             onClick={e => e.stopPropagation()}
+                             className="ml-1 inline-flex items-center gap-1 text-primary hover:underline text-xs font-bold uppercase tracking-wider"
+                           >
+                             <ExternalLink className="w-3 h-3" /> Maps
+                           </a>
                         </p>
                       </div>
                       <div className="text-right">
@@ -2315,21 +2203,21 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <div className="text-sm text-gray-500 mb-1">SEO Score</div>
-                            <div className="text-2xl font-semibold text-gray-900">{selectedLeadForOutreach.technicalAudit.seoScore}/10</div>
+                            <div className="text-2xl font-semibold text-gray-900">{selectedLeadForOutreach.technicalAudit?.seoScore ?? 'N/A'}/10</div>
                             <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
                               <div 
                                 className="h-full bg-primary rounded-full transition-all"
-                                style={{ width: `${selectedLeadForOutreach.technicalAudit.seoScore * 10}%` }}
+                                style={{ width: `${(selectedLeadForOutreach.technicalAudit?.seoScore ?? 0) * 10}%` }}
                               />
                             </div>
                           </div>
                           <div>
                             <div className="text-sm text-gray-500 mb-1">Load Speed</div>
-                            <div className="text-2xl font-semibold text-gray-900 capitalize">{selectedLeadForOutreach.technicalAudit.loadSpeed}</div>
+                            <div className="text-2xl font-semibold text-gray-900 capitalize">{selectedLeadForOutreach.technicalAudit?.loadSpeed ?? 'N/A'}</div>
                             <div className="mt-2 flex items-center gap-2">
-                              <div className={`w-2 h-2 rounded-full ${selectedLeadForOutreach.technicalAudit.loadSpeed === 'fast' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                              <div className={`w-2 h-2 rounded-full ${selectedLeadForOutreach.technicalAudit?.loadSpeed === 'fast' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                               <span className="text-xs text-gray-500">
-                                {selectedLeadForOutreach.technicalAudit.loadSpeed === 'fast' ? 'Good performance' : 'Needs optimization'}
+                                {selectedLeadForOutreach.technicalAudit?.loadSpeed === 'fast' ? 'Good performance' : 'Needs optimization'}
                               </span>
                             </div>
                           </div>
@@ -2351,15 +2239,36 @@ export default function App() {
                       {/* Competitors */}
                       {selectedLeadForOutreach.competitorBenchmarks && selectedLeadForOutreach.competitorBenchmarks.length > 0 && (
                         <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-                          <h3 className="text-base font-semibold text-gray-900 mb-4">Competitors</h3>
-                          <div className="space-y-3">
+                          <h3 className="text-base font-semibold text-gray-900 mb-4">Competitor Analysis</h3>
+                          <div className="space-y-4">
                             {selectedLeadForOutreach.competitorBenchmarks.map((comp, idx) => (
                               <div key={idx} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                <div className="flex justify-between items-start mb-2">
-                                  <h4 className="text-sm font-medium text-gray-900">{comp.name}</h4>
-                                  <Badge variant="outline" className="text-xs">SEO: {comp.seoScore}/10</Badge>
+                                <div className="flex justify-between items-start mb-3">
+                                  <div>
+                                    <h4 className="text-sm font-bold text-gray-900">{comp.name}</h4>
+                                    {comp.website && (
+                                      <a href={comp.website} target="_blank" rel="noreferrer"
+                                        className="text-xs text-primary hover:underline flex items-center gap-1 mt-0.5">
+                                        {comp.website} <ExternalLink className="w-2.5 h-2.5" />
+                                      </a>
+                                    )}
+                                  </div>
+                                  <div className="text-right shrink-0 ml-3">
+                                    <div className="text-xs text-gray-500 mb-1">SEO Score</div>
+                                    <div className="text-lg font-bold text-gray-900">{comp.seoScore ?? '?'}<span className="text-xs text-gray-400">/10</span></div>
+                                  </div>
                                 </div>
-                                <p className="text-xs text-gray-600 italic">"{comp.advantage}"</p>
+                                {/* SEO bar */}
+                                <div className="h-1.5 bg-gray-200 rounded-full mb-3 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${(comp.seoScore ?? 0) >= 7 ? 'bg-emerald-500' : (comp.seoScore ?? 0) >= 4 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                    style={{ width: `${(comp.seoScore ?? 0) * 10}%` }}
+                                  />
+                                </div>
+                                <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-1">What they do better</p>
+                                  <p className="text-sm text-gray-700">{comp.advantage || 'No data available'}</p>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -2418,8 +2327,11 @@ export default function App() {
                       {/* AI Outreach Generation */}
                       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-base font-semibold text-gray-900">AI Outreach</h3>
-                          <Button 
+                          <div>
+                            <h3 className="text-base font-semibold text-gray-900">Client Proposal Draft</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">AI-generated proposal based on audit findings & competitor data</p>
+                          </div>
+                          <Button
                             size="sm"
                             onClick={() => generateOutreach(selectedLeadForOutreach)}
                             disabled={generatingOutreach}
@@ -2428,9 +2340,26 @@ export default function App() {
                             {generatingOutreach ? (
                               <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Generating...</>
                             ) : (
-                              <><Zap className="w-4 h-4 mr-2" /> Generate Drafts</>
+                              <><Zap className="w-4 h-4 mr-2" /> Generate Proposal</>
                             )}
                           </Button>
+                        </div>
+
+                        {/* Tone selector */}
+                        <div className="flex gap-2 mb-4 flex-wrap">
+                          {(['professional', 'helpful', 'aggressive', 'curious'] as const).map(t => (
+                            <button
+                              key={t}
+                              onClick={() => setOutreachTone(t)}
+                              className={`text-[10px] font-bold px-3 py-1.5 rounded-full border uppercase tracking-wider transition-all ${
+                                outreachTone === t
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-primary/40'
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          ))}
                         </div>
 
                         {selectedLeadForOutreach.outreachDrafts ? (
@@ -2473,7 +2402,7 @@ export default function App() {
                         ) : (
                           <div className="text-center py-8 text-gray-400">
                             <Cpu className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                            <p className="text-sm">Click "Generate Drafts" to create personalized outreach messages</p>
+                            <p className="text-sm">Click "Generate Proposal" to create a personalized client proposal using audit findings and competitor data</p>
                           </div>
                         )}
                       </div>
@@ -2521,18 +2450,37 @@ export default function App() {
                       {selectedLeadForOutreach.socialLinks && selectedLeadForOutreach.socialLinks.length > 0 && (
                         <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
                           <h3 className="text-base font-semibold text-gray-900 mb-4">Social Media</h3>
-                          <div className="flex flex-wrap gap-2">
-                            {selectedLeadForOutreach.socialLinks.map((link, i) => (
-                              <a 
-                                key={i} 
-                                href={link} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="w-10 h-10 rounded-lg bg-gray-50 border border-gray-200 flex items-center justify-center hover:bg-primary hover:text-white hover:border-primary transition-all"
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                              </a>
-                            ))}
+                          <div className="flex flex-col gap-2">
+                            {selectedLeadForOutreach.socialLinks.map((link, i) => {
+                              const url = link.toLowerCase();
+                              const platform =
+                                url.includes('facebook') ? { name: 'Facebook', color: 'bg-blue-600' } :
+                                url.includes('instagram') ? { name: 'Instagram', color: 'bg-pink-500' } :
+                                url.includes('linkedin') ? { name: 'LinkedIn', color: 'bg-blue-700' } :
+                                url.includes('twitter') || url.includes('x.com') ? { name: 'X / Twitter', color: 'bg-gray-900' } :
+                                url.includes('youtube') ? { name: 'YouTube', color: 'bg-red-600' } :
+                                url.includes('tiktok') ? { name: 'TikTok', color: 'bg-black' } :
+                                url.includes('yelp') ? { name: 'Yelp', color: 'bg-red-500' } :
+                                { name: 'Website', color: 'bg-gray-500' };
+                              return (
+                                <a
+                                  key={i}
+                                  href={link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-50 transition-all group"
+                                >
+                                  <div className={`w-8 h-8 rounded-md ${platform.color} flex items-center justify-center shrink-0`}>
+                                    <ExternalLink className="w-3.5 h-3.5 text-white" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900">{platform.name}</p>
+                                    <p className="text-xs text-gray-400 truncate">{link}</p>
+                                  </div>
+                                  <ExternalLink className="w-3.5 h-3.5 text-gray-300 group-hover:text-primary transition-colors shrink-0" />
+                                </a>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -2621,7 +2569,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <DialogFooter className="bg-gray-50 px-6 py-4 flex flex-row gap-3">
+            <DialogFooter className="bg-gray-50 px-6 py-4 flex flex-row gap-3 mb-3">
               <Button 
                 variant="outline" 
                 onClick={() => setIsPromotionDialogOpen(false)}
@@ -2638,6 +2586,50 @@ export default function App() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Renewal Draft Modal */}
+        <Dialog open={!!renewalDraft || (generatingRenewal)} onOpenChange={(open) => { if (!open) { setRenewalDraft(null); setRenewalClient(null); } }}>
+          <DialogContent className="sm:max-w-2xl bg-card border-border shadow-lg rounded-lg overflow-hidden">
+            <DialogHeader className="p-6 pb-0">
+              <DialogTitle className="text-base font-bold uppercase tracking-widest">Renewal Draft</DialogTitle>
+              {renewalClient && <DialogDescription className="text-xs text-muted-foreground">{renewalClient.name}</DialogDescription>}
+            </DialogHeader>
+            <div className="p-6 space-y-4">
+              {generatingRenewal ? (
+                <div className="flex items-center justify-center py-12 gap-3">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Generating renewal draft...</p>
+                </div>
+              ) : renewalDraft ? (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Subject</label>
+                      <button className="text-xs text-primary hover:underline flex items-center gap-1"
+                        onClick={() => { navigator.clipboard.writeText(renewalDraft.subject); toast.success('Subject copied!'); }}>
+                        <Copy className="w-3 h-3" /> Copy
+                      </button>
+                    </div>
+                    <div className="p-3 bg-secondary/30 rounded border border-border text-sm font-medium">{renewalDraft.subject}</div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Email Body</label>
+                      <button className="text-xs text-primary hover:underline flex items-center gap-1"
+                        onClick={() => { navigator.clipboard.writeText(renewalDraft.email); toast.success('Email copied!'); }}>
+                        <Copy className="w-3 h-3" /> Copy
+                      </button>
+                    </div>
+                    <div className="p-4 bg-secondary/30 rounded border border-border text-sm text-foreground whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed">
+                      {renewalDraft.email}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </main>
     </div>
   );

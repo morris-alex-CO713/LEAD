@@ -10,7 +10,9 @@ import {
   History, 
   Settings, 
   UserIcon, 
-  LogOut 
+  LogOut,
+  Columns,
+  Activity
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -34,8 +36,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'Monitor', icon: LayoutDashboard },
     { id: 'search', label: 'Scanner', icon: MapIcon },
     { id: 'leads', label: 'CRM Leads', icon: ListFilter },
+    { id: 'kanban', label: 'Kanban Board', icon: Columns },
     { id: 'portfolio', label: 'Portfolio Vault', icon: Briefcase },
     { id: 'history', label: 'History', icon: History },
+    { id: 'usage', label: 'API Usage', icon: Activity },
   ];
 
   return (
