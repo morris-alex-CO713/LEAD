@@ -9,7 +9,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "deploy:frontend": "npm run build && firebase deploy --only hosting",
+    "deploy:backend": "cd server && vercel --prod",
+    "deploy": "npm run deploy:backend && npm run deploy:frontend"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

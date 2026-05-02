@@ -1213,7 +1213,9 @@ export default function App() {
                   </TableHeader>
                   <TableBody>
                     {paginatedSearchResults.map((biz, idx) => {
-                      const alreadySaved = listings.some(l => l.name === biz.name);
+                      const alreadySaved = listings.some(l => 
+                        l.name === biz.name && l.address === biz.address
+                      );
                       return (
                         <TableRow 
                           key={idx} 
@@ -1782,26 +1784,47 @@ export default function App() {
                                        <TableHead className="text-[9px] font-bold uppercase text-muted-foreground px-4 h-10">Name</TableHead>
                                        <TableHead className="text-[9px] font-bold uppercase text-muted-foreground px-4 h-10">Category</TableHead>
                                        <TableHead className="text-[9px] font-bold uppercase text-muted-foreground text-center px-4 h-10">Score</TableHead>
-                                       <TableHead className="text-[9px] font-bold uppercase text-muted-foreground text-right pr-6 h-10">Web Presence</TableHead>
+                                       <TableHead className="text-[9px] font-bold uppercase text-muted-foreground px-4 h-10">Web</TableHead>
+                                       <TableHead className="text-[9px] font-bold uppercase text-muted-foreground text-right pr-4 h-10">Action</TableHead>
                                     </TableRow>
                                  </TableHeader>
                                  <TableBody>
-                                    {scans.find(s => s.id === selectedScanId)?.results?.map((res, i) => (
-                                      <TableRow key={i} className="hover:bg-secondary/20 transition-all border-b border-border/50">
-                                        <TableCell className="font-bold text-foreground text-xs px-4 py-3">{res.name}</TableCell>
-                                        <TableCell className="text-[10px] text-muted-foreground uppercase tracking-tighter px-4 py-3">{res.category}</TableCell>
-                                        <TableCell className="text-center font-mono font-bold text-primary px-4 py-3">{res.leadScore}</TableCell>
-                                        <TableCell className="text-right pr-6 py-3">
-                                           <div className="flex gap-1 justify-end">
-                                              {res.hasWebsite ? (
-                                                <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[8px] uppercase px-1.5 py-0 rounded-sm">Live</Badge>
-                                              ) : (
-                                                <Badge className="bg-destructive/10 text-destructive border-none text-[8px] uppercase px-1.5 py-0 rounded-sm">Dark</Badge>
-                                              )}
-                                           </div>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
+                                    {scans.find(s => s.id === selectedScanId)?.results?.map((res, i) => {
+                                      const inCrm = listings.some(l => l.name === res.name && l.address === res.address);
+                                      return (
+                                        <TableRow key={i} className="hover:bg-secondary/20 transition-all border-b border-border/50">
+                                          <TableCell className="px-4 py-3">
+                                            <div className="flex flex-col">
+                                              <span className="font-bold text-foreground text-xs">{res.name}</span>
+                                              <span className="text-[9px] text-muted-foreground truncate max-w-[160px]">{res.address}</span>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell className="text-[10px] text-muted-foreground uppercase tracking-tighter px-4 py-3">{res.category}</TableCell>
+                                          <TableCell className="text-center font-mono font-bold text-primary px-4 py-3">{res.leadScore}</TableCell>
+                                          <TableCell className="px-4 py-3">
+                                            {res.hasWebsite ? (
+                                              <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[8px] uppercase px-1.5 py-0 rounded-sm">Live</Badge>
+                                            ) : (
+                                              <Badge className="bg-destructive/10 text-destructive border-none text-[8px] uppercase px-1.5 py-0 rounded-sm">Dark</Badge>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-right pr-4 py-3">
+                                            {inCrm ? (
+                                              <span className="text-[9px] font-bold text-primary uppercase tracking-wider">✓ In CRM</span>
+                                            ) : (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-7 px-3 font-bold text-[9px] uppercase tracking-wider border-border hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all"
+                                                onClick={() => saveListing(res)}
+                                              >
+                                                + Add
+                                              </Button>
+                                            )}
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
                                  </TableBody>
                                </Table>
                             </div>
