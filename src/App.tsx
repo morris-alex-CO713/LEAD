@@ -92,6 +92,7 @@ import NicheBrowser from './components/NicheBrowser';
 import { LoginView } from './views/LoginView';
 import { DashboardView } from './views/DashboardView';
 import UsageView from './views/UsageView';
+import InstallPrompt from './components/InstallPrompt';
 import { 
   BusinessListing, 
   PortfolioClient, 
@@ -790,6 +791,7 @@ export default function App() {
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden selection:bg-primary selection:text-primary-foreground">
       <Toaster position="top-right" expand={true} richColors theme={theme} />
+      <InstallPrompt />
       
       {/* SIDEBAR - Hidden on mobile */}
       <Sidebar 
