@@ -1,5 +1,7 @@
 # Production deployment
 
+Live app: https://lead-omega-ebon.vercel.app
+
 The current deployment uses the repository root on Vercel, hosting both the Vite frontend and the /api functions. The older Firebase Hosting site is https://lead-mgmt-ffdb6.web.app.
 
 ## Publish
