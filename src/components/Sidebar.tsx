@@ -12,7 +12,8 @@ import {
   UserIcon, 
   LogOut,
   Columns,
-  Activity
+  Activity,
+  Bot
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -39,6 +40,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'kanban', label: 'Kanban Board', icon: Columns },
     { id: 'portfolio', label: 'Portfolio Vault', icon: Briefcase },
     { id: 'history', label: 'History', icon: History },
+    { id: 'automation', label: 'Automation', icon: Bot },
     { id: 'usage', label: 'API Usage', icon: Activity },
   ];
 

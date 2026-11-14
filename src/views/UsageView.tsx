@@ -54,7 +54,7 @@ const UsageView: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground mb-1">API Usage Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Track your Gemini API consumption and costs</p>
+          <p className="text-sm text-muted-foreground">Track your OpenAI API consumption and configured cost estimates</p>
         </div>
         <Button 
           onClick={handleRefresh} 
@@ -140,7 +140,7 @@ const UsageView: React.FC = () => {
       <div>
         <h2 className="text-lg font-semibold text-foreground mb-3">Breakdown by Type (This Month)</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Object.entries(stats?.thisMonth.byType || {}).map(([type, data]) => (
+          {Object.entries((stats?.thisMonth.byType ?? {}) as UsageStats['thisMonth']['byType']).map(([type, data]) => (
             <Card key={type} className="p-4">
               <p className="text-sm font-semibold text-foreground mb-2">{callTypeLabels[type] || type}</p>
               <div className="space-y-1 text-xs">
@@ -185,8 +185,7 @@ const UsageView: React.FC = () => {
           <div>
             <h3 className="font-semibold text-foreground mb-2">About This Dashboard</h3>
             <p className="text-sm text-muted-foreground">
-              Gemini API doesn't provide a quota/limit endpoint. This dashboard tracks usage by logging every API call client-side. 
-              Costs are estimated based on Gemini 2.5 Flash Lite pricing ($0.075/1M prompt tokens, $0.30/1M output tokens).
+              This dashboard records token usage returned by the OpenAI API. Cost estimates use the input and output rates configured in your environment for the selected model.
             </p>
           </div>
         </div>

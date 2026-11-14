@@ -33,6 +33,9 @@ export interface BusinessListing {
     linkedin?: string;
     lastGenerated?: number;
   };
+  outreachApprovalStatus?: 'pending_review' | 'approved' | 'sent' | 'rejected';
+  outreachSubject?: string;
+  outreachEmail?: string;
 }
 
 export interface UserProfile {

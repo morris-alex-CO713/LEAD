@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+.vercel
+
+# Deployment metadata and generated API output
+.vercel/
+.firebase/
+api/**/*.js

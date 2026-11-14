@@ -47,19 +47,21 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ listings, onDragEnd, onLeadCl
                     {/* Cards */}
                     <div className="flex flex-col gap-3 flex-1">
                       {colListings.map((biz, index) => (
-                        <Draggable draggableId={biz.id} index={index} key={biz.id}>
-                          {(provided, snapshot) => (
-                            <LeadCard
-                              listing={biz}
-                              onClick={() => onLeadClick(biz)}
-                              draggableProps={provided.draggableProps}
-                              dragHandleProps={provided.dragHandleProps}
-                              innerRef={provided.innerRef}
-                              isDragging={snapshot.isDragging}
-                              isKanban={true}
-                            />
-                          )}
-                        </Draggable>
+                        <React.Fragment key={biz.id}>
+                          <Draggable draggableId={biz.id} index={index}>
+                            {(provided, snapshot) => (
+                              <LeadCard
+                                listing={biz}
+                                onClick={() => onLeadClick(biz)}
+                                draggableProps={provided.draggableProps}
+                                dragHandleProps={provided.dragHandleProps}
+                                innerRef={provided.innerRef}
+                                isDragging={snapshot.isDragging}
+                                isKanban={true}
+                              />
+                            )}
+                          </Draggable>
+                        </React.Fragment>
                       ))}
                       {provided.placeholder}
 

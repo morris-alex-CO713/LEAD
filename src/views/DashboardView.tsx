@@ -123,7 +123,7 @@ export function DashboardView({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
             <div className="space-y-4">
               <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2"><Search className="w-3 h-3" /> Acquisition</h3>
-              <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">Deploy sensors via the <b>Satellite Scanner</b> to identify local businesses. Our Gemini-powered engine audits their digital infrastructure in real-time.</p>
+              <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">Deploy sensors via the <b>Satellite Scanner</b> to identify local businesses. Our OpenAI-powered engine audits their digital infrastructure in real-time.</p>
             </div>
             <div className="space-y-4">
               <h3 className="text-[11px] font-black text-primary uppercase tracking-widest flex items-center gap-2"><Zap className="w-3 h-3" /> Evaluation</h3>

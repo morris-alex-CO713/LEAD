@@ -14,6 +14,7 @@ export interface UsageLog {
     location?: string;
     keyword?: string;
     leadName?: string;
+    clientName?: string;
     tone?: string;
   };
 }

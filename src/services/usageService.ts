@@ -4,10 +4,10 @@ import type { UsageLog, UsageStats } from '../types/usage';
 
 const USAGE_COLLECTION = 'usage_logs';
 
-// Gemini 2.5 Flash Lite pricing (as of 2024)
+// Display-only OpenAI pricing. Configure rates for the selected model in .env.
 const PRICING = {
-  promptTokens: 0.000075 / 1000, // $0.075 per 1M tokens
-  candidatesTokens: 0.0003 / 1000, // $0.30 per 1M tokens
+  promptTokens: Number(import.meta.env.VITE_OPENAI_INPUT_COST_PER_MILLION || 0) / 1_000_000,
+  candidatesTokens: Number(import.meta.env.VITE_OPENAI_OUTPUT_COST_PER_MILLION || 0) / 1_000_000,
 };
 
 export function calculateCost(tokensUsed: UsageLog['tokensUsed']): number {

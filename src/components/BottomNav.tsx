@@ -14,7 +14,8 @@ import {
   Activity,
   Settings,
   LogOut,
-  UserIcon
+  UserIcon,
+  Bot
 } from 'lucide-react';
 
 interface BottomNavProps {
@@ -46,6 +47,7 @@ const BottomNav: React.FC<BottomNavProps> = ({
 
   const drawerItems = [
     { id: 'history', label: 'History', icon: History },
+    { id: 'automation', label: 'Automation', icon: Bot },
     { id: 'usage', label: 'API Usage', icon: Activity },
   ];
 

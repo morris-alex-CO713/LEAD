@@ -92,6 +92,7 @@ import NicheBrowser from './components/NicheBrowser';
 import { LoginView } from './views/LoginView';
 import { DashboardView } from './views/DashboardView';
 import UsageView from './views/UsageView';
+import AutomationReportsView from './views/AutomationReportsView';
 import InstallPrompt from './components/InstallPrompt';
 import { 
   BusinessListing, 
@@ -2142,7 +2143,7 @@ export default function App() {
                     <div className="space-y-1">
                       <h3 className="font-bold text-xl text-foreground">System Integrity</h3>
                       <p className="text-xs lg:text-sm text-muted-foreground font-medium leading-relaxed">
-                        Data is synchronized with Google Maps API and audited via Gemini 1.5 Flash.
+                        Business data is discovered with OpenAI web search and stored in Firebase.
                       </p>
                     </div>
                     <div className="pt-2 flex gap-3">
@@ -2162,6 +2163,17 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
             >
               <UsageView />
+            </motion.div>
+          )}
+
+          {activeTab === 'automation' && (
+            <motion.div
+              key="automation"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <AutomationReportsView />
             </motion.div>
           )}
 
