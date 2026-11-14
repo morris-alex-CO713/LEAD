@@ -1,3 +1,5 @@
+import { isEmailConfigured, sendEmail } from './email.js';
+
 export interface DailyReportMessage {
   date: string;
   scanned: number;
@@ -29,25 +31,19 @@ export function formatDailyReport(report: DailyReportMessage): string {
 }
 
 export async function sendReportEmail(report: DailyReportMessage): Promise<DeliveryResult> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.REPORT_EMAIL_FROM;
+  const from = process.env.REPORT_EMAIL_FROM || process.env.OUTREACH_EMAIL_FROM || process.env.SMTP_USER;
   const to = process.env.REPORT_EMAIL_TO;
-  if (!apiKey || !from || !to) {
-    return { channel: 'email', sent: false, skipped: true, detail: 'Email environment variables are incomplete.' };
+  if (!isEmailConfigured() || !from || !to) {
+    return { channel: 'email', sent: false, skipped: true, detail: 'Mailbox SMTP or report recipient is not configured.' };
   }
   const text = formatDailyReport(report);
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from,
-      to: to.split(',').map(value => value.trim()).filter(Boolean),
-      subject: `Daily Prospect Report - ${report.date}`,
-      text,
-      html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${escapeHtml(text)}</pre>`,
-    }),
+  await sendEmail({
+    from,
+    to: to.split(',').map(value => value.trim()).filter(Boolean),
+    subject: 'Daily Prospect Report - ' + report.date,
+    text,
+    html: '<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">' + escapeHtml(text) + '</pre>',
   });
-  if (!response.ok) throw new Error(`Email delivery failed (${response.status}): ${await response.text()}`);
   return { channel: 'email', sent: true };
 }
 

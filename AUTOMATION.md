@@ -22,7 +22,7 @@ This job does not email prospects. Automated leads receive `outreachApprovalStat
    ```
 
 4. Generate a long random `CRON_SECRET`. Vercel automatically sends it as the cron request's bearer token.
-5. Verify the business email domain in Resend. Configure SPF and DKIM records shown by Resend, then set `RESEND_API_KEY`, `REPORT_EMAIL_FROM`, and `REPORT_EMAIL_TO`.
+5. Configure mailbox SMTP using `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASS`; set `REPORT_EMAIL_FROM` and `REPORT_EMAIL_TO`. For Google Workspace, authenticate as the primary mailbox using an app password and send as its configured alias. See DEPLOY.md.
 6. In Meta Business Manager, configure WhatsApp Cloud API and create an approved utility template named `daily_lead_report`. The template body must contain one variable (`{{1}}`), which receives the formatted report. Set the WhatsApp variables documented in `.env.example` and ensure the destination number has opted in.
 7. Set `DASHBOARD_URL` to the production application URL.
 
